@@ -2332,9 +2332,9 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
 
     @Override
     public Map<Card, ManaCostShard> chooseCardsForConvokeOrImprovise(final SpellAbility sa, final ManaCost manaCost,
-                                                                     final CardCollectionView untappedCards, boolean improvise) {
+                                                                     final CardCollectionView untappedCards, boolean artifacts, boolean creatures, Integer maxReduction) {
         final InputSelectCardsForConvokeOrImprovise inp = new InputSelectCardsForConvokeOrImprovise(this, player,
-                manaCost, untappedCards, improvise, sa);
+                sa, manaCost, untappedCards, artifacts, creatures, maxReduction);
         inp.showAndWait();
         return inp.getConvokeMap();
     }
@@ -2942,13 +2942,11 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
             }
             final Player p = pOld;
 
-
             final CardDb carddb = FModel.getMagicDb().getCommonCards();
-            final List<ICardFace> faces = Lists.newArrayList(carddb.getAllFaces());
 
             List<CardFaceView> choices = new ArrayList<>();
             CardFaceView cardFaceView;
-            for (ICardFace cardFace : faces) {
+            for (ICardFace cardFace : carddb.getAllFaces()) {
                 cardFaceView = new CardFaceView(CardTranslation.getTranslatedName(cardFace.getDisplayName()), cardFace.getName());
                 choices.add(cardFaceView);
             }

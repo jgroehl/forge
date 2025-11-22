@@ -21,6 +21,7 @@ import forge.game.player.PlayerPredicates;
 import forge.game.spellability.AbilitySub;
 import forge.game.spellability.SpellAbility;
 import forge.game.spellability.TargetRestrictions;
+import forge.game.staticability.StaticAbility;
 import forge.game.trigger.Trigger;
 import forge.game.trigger.TriggerType;
 import forge.game.zone.ZoneType;
@@ -43,11 +44,11 @@ public class CountersPutAi extends CountersAi {
      * forge.game.card.Card)
      */
     @Override
-    protected boolean willPayCosts(Player ai, SpellAbility sa, Cost cost, Card source) {
+    protected boolean willPayCosts(Player payer, SpellAbility sa, Cost cost, Card source) {
         final String type = sa.getParam("CounterType");
         final String aiLogic = sa.getParamOrDefault("AILogic", "");
 
-        if (!super.willPayCosts(ai, sa, cost, source)) {
+        if (!super.willPayCosts(payer, sa, cost, source)) {
             return false;
         }
 
@@ -105,7 +106,12 @@ public class CountersPutAi extends CountersAi {
                     }
                 }
             }
-            int maxLevel = Integer.parseInt(sa.getParam("MaxLevel"));
+            int maxLevel = 0;
+            for (StaticAbility st : source.getStaticAbilities()) {
+                if (st.toString().startsWith("LEVEL ")) {
+                    maxLevel = Math.max(maxLevel, Integer.parseInt(st.toString().substring(6, 7)));
+                }
+            }
             return source.getCounters(CounterEnumType.LEVEL) < maxLevel;
         }
 
@@ -663,7 +669,7 @@ public class CountersPutAi extends CountersAi {
     }
 
     @Override
-    public AiAbilityDecision chkDrawback(final SpellAbility sa, Player ai) {
+    public AiAbilityDecision chkDrawback(Player ai, final SpellAbility sa) {
         final Game game = ai.getGame();
         Card choice = null;
         final String type = sa.getParam("CounterType");
