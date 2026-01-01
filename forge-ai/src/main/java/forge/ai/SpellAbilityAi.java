@@ -56,6 +56,7 @@ public abstract class SpellAbilityAi {
      * Handles the AI decision to play a "main" SpellAbility
      */
     protected AiAbilityDecision canPlay(final Player ai, final SpellAbility sa) {
+        // TODO this is redundant when reached from canPlayAndPayForFace
         if (sa.getRestrictions() != null && !sa.getRestrictions().canPlay(sa.getHostCard(), sa)) {
             return new AiAbilityDecision(0, AiPlayDecision.CantPlaySa);
         }
@@ -65,7 +66,6 @@ public abstract class SpellAbilityAi {
 
     protected AiAbilityDecision canPlayWithoutRestrict(final Player ai, final SpellAbility sa) {
         final Card source = sa.getHostCard();
-        final Cost cost = sa.getPayCosts();
 
         if (sa.hasParam("AILogic")) {
             final String logic = sa.getParam("AILogic");
@@ -89,6 +89,7 @@ public abstract class SpellAbilityAi {
         }
 
         // needs to be after API logic because needs to check possible X Cost
+        final Cost cost = sa.getPayCosts();
         if (cost != null && !willPayCosts(ai, sa, cost, source)) {
             return new AiAbilityDecision(0, AiPlayDecision.CostNotAcceptable);
         }
@@ -389,7 +390,7 @@ public abstract class SpellAbilityAi {
 
         if (payNever) { return false; }
 
-        // AI will only pay when it's not already payed and only opponents abilities
+        // AI will only pay when it's not already paid and only opponents abilities
         if (alreadyPaid || (payers.size() > 1 && isMine)) {
             return false;
         }

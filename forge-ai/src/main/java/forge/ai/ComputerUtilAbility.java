@@ -5,8 +5,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 
+import com.google.common.collect.Multimap;
 import forge.card.CardStateName;
 import forge.game.Game;
 import forge.game.GameActionUtil;
@@ -81,27 +83,34 @@ public class ComputerUtilAbility {
         return all;
     }
 
-    public static List<SpellAbility> getSpellAbilities(final CardCollectionView l, final Player player) {
+    public static List<SpellAbility> getSpellAbilities(final CardCollectionView all, final Player activator) {
         final List<SpellAbility> spellAbilities = Lists.newArrayList();
-        for (final Card c : l) {
-            spellAbilities.addAll(c.getAllPossibleAbilities(player, false));
+        for (final Card c : all) {
+            Multimap<SpellAbility, SpellAbility> unhiddenAltCost = ArrayListMultimap.create();
+            List<SpellAbility> possible = c.getAllPossibleAbilities(activator, false, unhiddenAltCost);
+            for (SpellAbility sa : unhiddenAltCost.keySet()) {
+                if (possible.contains(sa)) {
+                    // when SA can also be played as basic exclude its AltCost to prevent redundant check later
+                    possible.removeAll(unhiddenAltCost.get(sa));
+                }
+            }
+            spellAbilities.addAll(possible);
         }
         return spellAbilities;
     }
 
-    public static List<SpellAbility> getOriginalAndAltCostAbilities(final List<SpellAbility> originList, final Player player) {
-        final List<SpellAbility> newAbilities = Lists.newArrayList();
-
+    public static List<SpellAbility> getOriginalAndAltCostAbilities(final List<SpellAbility> originList, final Player activator) {
         List<SpellAbility> originListWithAddCosts = Lists.newArrayList();
         for (SpellAbility sa : originList) {
             // If this spell has alternative additional costs, add them instead of the unmodified SA itself
-            sa.setActivatingPlayer(player);
+            sa.setActivatingPlayer(activator);
             originListWithAddCosts.addAll(GameActionUtil.getAdditionalCostSpell(sa));
         }
 
+        final List<SpellAbility> newAbilities = Lists.newArrayList();
         for (SpellAbility sa : originListWithAddCosts) {
             // determine which alternative costs are cheaper than the original and prioritize them
-            List<SpellAbility> saAltCosts = GameActionUtil.getAlternativeCosts(sa, player, false);
+            List<SpellAbility> saAltCosts = GameActionUtil.getAlternativeCosts(sa, activator, false);
             List<SpellAbility> priorityAltSa = Lists.newArrayList();
             List<SpellAbility> otherAltSa = Lists.newArrayList();
             for (SpellAbility altSa : saAltCosts) {
@@ -122,20 +131,20 @@ public class ComputerUtilAbility {
 
         final List<SpellAbility> result = Lists.newArrayList();
         for (SpellAbility sa : newAbilities) {
-            sa.setActivatingPlayer(player);
+            sa.setActivatingPlayer(activator);
 
             // Optional cost selection through the AI controller
             boolean choseOptCost = false;
             List<OptionalCostValue> list = GameActionUtil.getOptionalCostValues(sa);
             if (!list.isEmpty()) {
-                // still add base spell in case of Promise Gift
-                if (list.stream().anyMatch(ocv -> ocv.getType().equals(OptionalCost.PromiseGift))) {
-                    result.add(sa);
-                }
-                list = player.getController().chooseOptionalCosts(sa, list);
+                list = activator.getController().chooseOptionalCosts(sa, list);
                 if (!list.isEmpty()) {
-                    choseOptCost = true;
+                    // still check base spell first in case of Promise Gift
+                    if (list.stream().anyMatch(ocv -> ocv.getType().equals(OptionalCost.PromiseGift))) {
+                        result.add(sa);
+                    }
                     result.add(GameActionUtil.addOptionalCosts(sa, list));
+                    choseOptCost = true;
                 }
             }
 
@@ -323,10 +332,11 @@ public class ComputerUtilAbility {
             a1 += getSpellAbilityPriority(a);
             b1 += getSpellAbilityPriority(b);
 
-            // If both are creature spells sort them after
+            // if both are creature spells sort them after
             if (safeToEvaluateCreatures) {
-                a1 += Math.round(ComputerUtilCard.evaluateCreature(a) / 100f);
-                b1 += Math.round(ComputerUtilCard.evaluateCreature(b) / 100f);
+                // try to align the scales: if priority swings in either direction extra evaluation matters less
+                a1 += Math.round(ComputerUtilCard.evaluateCreature(a) / (10.5f + Math.abs(a1)));
+                b1 += Math.round(ComputerUtilCard.evaluateCreature(b) / (10.5f + Math.abs(b1)));
             }
 
             return b1 - a1;
@@ -357,7 +367,7 @@ public class ComputerUtilAbility {
                 if (ComputerUtilCard.isCardRemAIDeck(sa.getOriginalHost() != null ? sa.getOriginalHost() : source)) {
                     p -= 10;
                 }
-                // don't play equipments before having any creatures
+                // don't play equipment before having any creatures
                 if (source.isEquipment() && noCreatures) {
                     p -= 9;
                 }

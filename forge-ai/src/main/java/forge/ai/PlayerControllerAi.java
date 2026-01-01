@@ -49,6 +49,7 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 
 /**
@@ -340,7 +341,7 @@ public class PlayerControllerAi extends PlayerController {
         // Ideally, it would do something like
         // Verify we actually want to play this. Including: "Would play with assistance" and "would play without assistance"
         // Find an ally/player that might be helpful to pay for an effect
-        // If noone seems likely, just return null
+        // If no one seems likely, just return null
         // If player fails to assist, don't try to request assistance until next turn
         // If player fails to assist, maybe still cast it anyway?
 
@@ -350,7 +351,7 @@ public class PlayerControllerAi extends PlayerController {
     @Override
     public <T extends GameEntity> T chooseSingleEntityForEffect(FCollectionView<T> optionList, DelayedReveal delayedReveal, SpellAbility sa, String title, boolean isOptional, Player targetedPlayer, Map<String, Object> params) {
         if (delayedReveal != null) {
-            reveal(delayedReveal.getCards(), delayedReveal.getZone(), delayedReveal.getOwner(), delayedReveal.getMessagePrefix());
+            reveal(delayedReveal);
         }
         return SpellApiToAi.Converter.get(sa).chooseSingleEntity(player, sa, (FCollection<T>)optionList, isOptional, targetedPlayer, params);
     }
@@ -360,7 +361,7 @@ public class PlayerControllerAi extends PlayerController {
             FCollectionView<T> optionList, int min, int max, DelayedReveal delayedReveal, SpellAbility sa, String title,
             Player targetedPlayer, Map<String, Object> params) {
         if (delayedReveal != null) {
-            reveal(delayedReveal.getCards(), delayedReveal.getZone(), delayedReveal.getOwner(), delayedReveal.getMessagePrefix());
+            reveal(delayedReveal);
         }
         FCollection<T> remaining = new FCollection<>(optionList);
         List<T> selecteds = new ArrayList<>();
@@ -1051,8 +1052,8 @@ public class PlayerControllerAi extends PlayerController {
     }
 
     @Override
-    public List<String> chooseColors(String message, SpellAbility sa, int min, int max, List<String> options) {
-        return ComputerUtilCard.chooseColor(sa, min, max, options);
+    public ColorSet chooseColors(String message, SpellAbility sa, int min, int max, ColorSet options) {
+        return ColorSet.fromNames(ComputerUtilCard.chooseColor(sa, min, max, options.stream().map(MagicColor.Color::getName).collect(Collectors.toList())));
     }
 
     /*
@@ -1385,7 +1386,7 @@ public class PlayerControllerAi extends PlayerController {
     public Map<Card, ManaCostShard> chooseCardsForConvokeOrImprovise(SpellAbility sa, ManaCost manaCost, CardCollectionView untappedCards, boolean artifacts, boolean creatures, Integer maxReduction) {
         final Player ai = sa.getActivatingPlayer();
         final PhaseHandler ph = ai.getGame().getPhaseHandler();
-        //Filter out mana sources that will interfere with payManaCost()
+        // Filter out mana sources that will interfere with payManaCost()
         CardCollection untapped = CardLists.filter(untappedCards, c -> c.getManaAbilities().isEmpty());
 
         // Filter out creatures if AI hasn't attacked yet
@@ -1398,14 +1399,14 @@ public class PlayerControllerAi extends PlayerController {
             }
         }
 
-        //Do not convoke potential blockers until after opponent's attack
-        final CardCollectionView blockers = ComputerUtilCard.getLikelyBlockers(ai, null);
         if ((ph.isPlayerTurn(ai) && ph.getPhase().isAfter(PhaseType.COMBAT_BEGIN)) ||
                 (!ph.isPlayerTurn(ai) && ph.getPhase().isBefore(PhaseType.COMBAT_DECLARE_BLOCKERS))) {
-            untapped.removeAll((List<?>)blockers);
-            //Add threatened creatures
-            if (!ai.getGame().getStack().isEmpty()) {
-                final List<GameObject> objects = ComputerUtil.predictThreatenedObjects(sa.getActivatingPlayer(), null);
+            // Do not convoke potential blockers until after opponent's attack
+            final CardCollectionView blockers = ComputerUtil.protectRecursion(sa, () -> ComputerUtilCard.getLikelyBlockers(ai, null), CardCollection.EMPTY);
+            untapped.removeAll(blockers);
+            // Add threatened creatures
+            if (!ai.getGame().getStack().isEmpty() && !blockers.isEmpty()) {
+                final List<GameObject> objects = ComputerUtil.predictThreatenedObjects(ai, null);
                 for (Card c : blockers) {
                     if (objects.contains(c) && (creatures || c.isArtifact())) {
                         untapped.add(c);
@@ -1491,7 +1492,7 @@ public class PlayerControllerAi extends PlayerController {
             List<ZoneType> origin, SpellAbility sa, CardCollection fetchList, DelayedReveal delayedReveal,
             String selectPrompt, boolean isOptional, Player decider) {
         if (delayedReveal != null) {
-            reveal(delayedReveal.getCards(), delayedReveal.getZone(), delayedReveal.getOwner(), delayedReveal.getMessagePrefix());
+            reveal(delayedReveal);
         }
         return brains.chooseCardToHiddenOriginChangeZone(destination, origin, sa, fetchList, player, decider);
     }
