@@ -5,8 +5,8 @@ import forge.ai.GameState;
 import forge.deck.CardPool;
 import forge.game.GameEntityView;
 import forge.game.GameView;
-import forge.game.card.Card;
 import forge.game.card.CardView;
+import forge.game.event.GameEvent;
 import forge.game.event.GameEventSpellAbilityCast;
 import forge.game.event.GameEventSpellRemovedFromStack;
 import forge.game.phase.PhaseType;
@@ -15,6 +15,7 @@ import forge.game.player.IHasIcon;
 import forge.game.player.PlayerView;
 import forge.game.spellability.SpellAbilityView;
 import forge.game.zone.ZoneType;
+import forge.gamemodes.net.DeltaPacket;
 import forge.gui.control.PlaybackSpeed;
 import forge.interfaces.IGameController;
 import forge.item.PaperCard;
@@ -31,6 +32,14 @@ import java.util.Map;
 
 public interface IGuiGame {
     void setGameView(GameView gameView);
+
+    /**
+     * Set the game view with a sequence number for delta sync baseline.
+     * Local games ignore the sequence number.
+     */
+    default void setGameView(GameView gameView, long sequenceNumber) {
+        setGameView(gameView);
+    }
 
     GameView getGameView();
 
@@ -65,22 +74,26 @@ public interface IGuiGame {
     void updatePlayerControl();
 
     void enableOverlay();
-
     void disableOverlay();
 
     void finishGame();
 
     void showManaPool(PlayerView player);
-
     void hideManaPool(PlayerView player);
 
     void updateStack();
 
     void notifyStackAddition(final GameEventSpellAbilityCast event);
-
     void notifyStackRemoval(final GameEventSpellRemovedFromStack event);
 
-    void handleLandPlayed(Card land);
+    void handleLandPlayed(CardView land);
+
+    void handleGameEvent(GameEvent event);
+    default void handleGameEvents(List<GameEvent> events) {
+        for (GameEvent event : events) {
+            handleGameEvent(event);
+        }
+    }
 
     Iterable<PlayerZoneUpdate> tempShowZones(PlayerView controller, Iterable<PlayerZoneUpdate> zonesToUpdate);
 
@@ -227,9 +240,7 @@ public interface IGuiGame {
 
     void restoreOldZones(PlayerView playerView, PlayerZoneUpdates playerZoneUpdates);
 
-    void setHighlighted(PlayerView pv, boolean b);
-
-    void setUsedToPay(CardView card, boolean value);
+    void setHighlighted(GameEntityView pv, boolean b);
 
     void setSelectables(final Iterable<CardView> cards);
 
@@ -239,43 +250,49 @@ public interface IGuiGame {
 
     boolean isGamePaused();
 
-    void setgamePause(boolean pause);
+    void setGamePause(boolean pause);
 
+    PlaybackSpeed getGameSpeed();
     void setGameSpeed(PlaybackSpeed gameSpeed);
 
     String getDayTime();
-
     void updateDayTime(String daytime);
 
     void awaitNextInput();
-
     void cancelAwaitNextInput();
+
+    /** Signal to start a client-side elapsed timer for waiting display. */
+    void showWaitingTimer(PlayerView forPlayer, String waitingForPlayerName);
 
     boolean isUiSetToSkipPhase(PlayerView playerTurn, PhaseType phase);
 
     void autoPassUntilEndOfTurn(PlayerView player);
-
     boolean mayAutoPass(PlayerView player);
-
     void autoPassCancel(PlayerView player);
 
     void updateAutoPassPrompt();
 
     boolean shouldAutoYield(String key);
-
     void setShouldAutoYield(String key, boolean autoYield);
 
     boolean shouldAlwaysAcceptTrigger(int trigger);
-
     boolean shouldAlwaysDeclineTrigger(int trigger);
 
     void setShouldAlwaysAcceptTrigger(int trigger);
-
     void setShouldAlwaysDeclineTrigger(int trigger);
-
     void setShouldAlwaysAskTrigger(int trigger);
 
     void clearAutoYields();
 
     void setCurrentPlayer(PlayerView player);
+
+    /**
+     * Apply a delta update packet to the local game state.
+     * @param packet the delta packet containing changes
+     */
+    void applyDelta(DeltaPacket packet);
+
+    /** Returns true if this game instance is a network game. */
+    boolean isNetGame();
+    void setNetGame();
 }

@@ -149,7 +149,7 @@ public class DeckgenUtil {
         for(Pair<String, Double> pair:preSelectedCardNames){
             String name = pair.getLeft();
             //remove any cards not valid in format
-            PaperCard cardToAdd = Aggregates.random(StaticData.instance().getCommonCards().getAllCards(name, format.getFilterPrinted()));
+            PaperCard cardToAdd = Aggregates.random(StaticData.instance().getCommonCards().getAllCardsNoAlt(name, format.getFilterPrinted()));
             if (cardToAdd == null)
                 continue;
             if(!cardToAdd.getName().equals(card.getName())) {
@@ -240,7 +240,7 @@ public class DeckgenUtil {
         for(Pair<String, Double> pair:preSelectedCardNames){
             String name = pair.getLeft();
             //remove any cards not valid in format
-            PaperCard cardToAdd = Aggregates.random(StaticData.instance().getCommonCards().getAllCards(name, format.getFilterPrinted()));
+            PaperCard cardToAdd = Aggregates.random(StaticData.instance().getCommonCards().getAllCardsNoAlt(name, format.getFilterPrinted()));
             if(cardToAdd != null && !cardToAdd.getName().equals(card.getName())) {
                 selectedCards.add(cardToAdd);
                 cardCount++;
@@ -352,7 +352,7 @@ public class DeckgenUtil {
             final CardPool cards = gen.getDeck(60, forAi);
 
             if (null == deckName) {
-                deckName = Lang.joinHomogenous(Arrays.asList(selection));
+                deckName = Lang.joinHomogenous(List.of(selection));
             }
 
             // After generating card lists, build deck.
@@ -423,6 +423,11 @@ public class DeckgenUtil {
 
     /** @return {@link forge.deck.Deck} */
     public static Deck getRandomOrPreconOrThemeDeck(String colors, boolean forAi, boolean isTheme, boolean useGeneticAI) {
+        return getRandomOrPreconOrThemeDeck(colors, forAi, isTheme, useGeneticAI, null);
+    }
+
+    /** @return {@link forge.deck.Deck} */
+    public static Deck getRandomOrPreconOrThemeDeck(String colors, boolean forAi, boolean isTheme, boolean useGeneticAI, String[] allowedEditions) {
         final List<String> selection = new ArrayList<>();
         Deck deck = null;
         if (advPrecons.isEmpty()) {
@@ -457,6 +462,10 @@ public class DeckgenUtil {
 
             } else {
                 Predicate<DeckProxy> predicate = deckProxy -> deckProxy.getMainSize() <= 60;
+                if (allowedEditions != null && allowedEditions.length > 0) {
+                    Set<String> editionSet = new HashSet<>(Arrays.asList(allowedEditions));
+                    predicate = predicate.and(dp -> dp.getEdition() != null && editionSet.contains(dp.getEdition().getCode()));
+                }
                 if (!selection.isEmpty() && selection.size() < 4)
                     predicate = predicate.and(deckProxy -> deckProxy.getColorIdentity().hasAllColors(ColorSet.fromNames(colors.toCharArray()).getColor()));
                 List<DeckProxy> source = isTheme ? advThemes : advPrecons;

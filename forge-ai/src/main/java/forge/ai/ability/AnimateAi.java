@@ -158,9 +158,8 @@ public class AnimateAi extends SpellAbilityAi {
             return new AiAbilityDecision(0, AiPlayDecision.CostNotAcceptable);
         }
 
-        if (sa.costHasManaX() && sa.getSVar("X").equals("Count$xPaid")) {
-            final int xPay = ComputerUtilCost.getMaxXValue(sa, aiPlayer, sa.isTrigger());
-            sa.setXManaCostPaid(xPay);
+        if (sa.costHasManaX()) {
+            ComputerUtilCost.setMaxXValue(sa, aiPlayer, sa.isTrigger());
         }
 
         if (sa.usesTargeting()) {
@@ -559,9 +558,9 @@ public class AnimateAi extends SpellAbilityAi {
                 timestamp, "Permanent");
 
         // check if animate added static Abilities
-        CardTraitChanges traits = card.getChangedCardTraits().get(timestamp, 0);
+        ICardTraitChanges traits = card.getChangedCardTraits().get(timestamp, 0);
         if (traits != null) {
-            for (StaticAbility stAb : traits.getStaticAbilities()) {
+            for (StaticAbility stAb : traits.applyStaticAbility(Lists.newArrayList())) {
                 if (stAb.checkMode(StaticAbilityMode.Continuous)) {
                     for (final StaticAbilityLayer layer : stAb.getLayers()) {
                         StaticAbilityContinuous.applyContinuousAbility(stAb, new CardCollection(card), layer);

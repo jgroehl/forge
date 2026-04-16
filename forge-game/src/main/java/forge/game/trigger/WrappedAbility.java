@@ -39,8 +39,6 @@ public class WrappedAbility extends Ability {
     private final SpellAbility sa;
     private Player decider;
 
-    boolean mandatory = false;
-
     public WrappedAbility(final Trigger regtrig0, final SpellAbility sa0, final Player decider0) {
         super(sa0.getHostCard(), ManaCost.ZERO);
         setTrigger(regtrig0);
@@ -129,21 +127,6 @@ public class WrappedAbility extends Ability {
     @Override
     public void resetTriggeringObjects() {
         sa.resetTriggeringObjects();
-    }
-
-    @Override
-    public List<Object> getTriggerRemembered() {
-        return sa.getTriggerRemembered();
-    }
-
-    @Override
-    public void resetTriggerRemembered() {
-        sa.resetTriggerRemembered();
-    }
-
-    @Override
-    public void setTriggerRemembered(List<Object> list) {
-        sa.setTriggerRemembered(list);
     }
 
     @Override

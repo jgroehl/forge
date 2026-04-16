@@ -264,6 +264,10 @@ public class PlayEffect extends SpellAbilityEffect {
                 final Zone zone = tgtCard.getZone();
                 tgtCard = Card.fromPaperCard(tgtCard.getPaperCard(), controller);
 
+                if (sa.hasParam("Paradigm")) {
+                    tgtCard.removeIntrinsicKeyword(Keyword.PARADIGM);
+                }
+
                 tgtCard.setGamePieceType(GamePieceType.TOKEN);
                 tgtCard.setZone(zone);
                 // to fix the CMC
@@ -514,7 +518,7 @@ public class PlayEffect extends SpellAbilityEffect {
             eff.copyChangedTextFrom(hostCard);
         }
 
-        game.getEndOfTurn().addUntil(exileEffectCommand(game, eff));
+        game.getEndOfTurn().addUntil(() -> game.getAction().exileEffect(eff));
 
         tgtSA.addRollbackEffect(eff);
 

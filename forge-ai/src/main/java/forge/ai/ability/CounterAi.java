@@ -52,17 +52,14 @@ public class CounterAi extends SpellAbilityAi {
             if ((topSA.isSpell() && !topSA.isCounterableBy(sa)) || ai.getYourTeam().contains(topSA.getActivatingPlayer())) {
                 // might as well check for player's friendliness
                 return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
-            } else if (sa.hasParam("ConditionWouldDestroy") && !CounterEffect.checkForConditionWouldDestroy(sa, topSA)) {
+            }
+            if (sa.hasParam("ConditionWouldDestroy") && !CounterEffect.checkForConditionWouldDestroy(sa, topSA)) {
                 return new AiAbilityDecision(0, AiPlayDecision.CantPlaySa);
             }
 
             // check if the top ability on the stack corresponds to the AI-specific targeting declaration, if provided
             if (sa.hasParam("AITgts") && (topSA.getHostCard() == null
                     || !topSA.getHostCard().isValid(sa.getParam("AITgts"), sa.getActivatingPlayer(), source, sa))) {
-                return new AiAbilityDecision(0, AiPlayDecision.TargetingFailed);
-            }
-
-            if (sa.hasParam("CounterNoManaSpell") && topSA.getTotalManaSpent() > 0) {
                 return new AiAbilityDecision(0, AiPlayDecision.TargetingFailed);
             }
 
@@ -105,7 +102,7 @@ public class CounterAi extends SpellAbilityAi {
             boolean setPayX = false;
             if (unlessCost.equals("X") && sa.getSVar(unlessCost).equals("Count$xPaid")) {
                 setPayX = true;
-                toPay = Math.min(ComputerUtilCost.getMaxXValue(sa, ai, true), usableManaSources + 1);
+                toPay = Math.min(ComputerUtilCost.setMaxXValue(sa, ai, true), usableManaSources + 1);
             } else {
                 toPay = AbilityUtils.calculateAmount(source, unlessCost, sa);
             }
@@ -266,7 +263,7 @@ public class CounterAi extends SpellAbilityAi {
                 boolean setPayX = false;
                 if (unlessCost.equals("X") && sa.getSVar(unlessCost).equals("Count$xPaid")) {
                     setPayX = true;
-                    toPay = ComputerUtilCost.getMaxXValue(sa, ai, true);
+                    toPay = ComputerUtilCost.setMaxXValue(sa, ai, true);
                 } else {
                     toPay = AbilityUtils.calculateAmount(source, unlessCost, sa);
                 }

@@ -1527,7 +1527,7 @@ public class CardProperty {
                 }
             }
             if (property.startsWith("attacking ")) { // generic "attacking [DefinedGameEntity]"
-                FCollection<GameEntity> defined = AbilityUtils.getDefinedEntities(source, property.split(" ")[1], spellAbility);
+                FCollection<GameEntity> defined = AbilityUtils.getDefinedEntities(source, property.split(" ", 2)[1], spellAbility);
                 final GameEntity defender = combat.getDefenderByAttacker(card);
                 if (!defined.contains(defender)) {
                     return false;
@@ -1777,6 +1777,14 @@ public class CardProperty {
                 return false;
             }
             return card.getCastSA().isSpectacle();
+        } else if (property.equals("sneaked")) {
+            if (card.getCastSA() == null) {
+                return false;
+            }
+            if (AbilityUtils.isUnlinkedFromCastSA(spellAbility, card)) {
+                return false;
+            }
+            return card.getCastSA().isSneak();
         } else if (property.equals("foretold")) {
             if (!card.isForetold()) {
                 return false;
@@ -1835,16 +1843,8 @@ public class CardProperty {
             if (!source.isRemembered(card)) {
                 return false;
             }
-        } else if (property.equals("IsNotRemembered")) {
-            if (source.isRemembered(card)) {
-                return false;
-            }
         } else if (property.equals("IsImprinted")) {
             if (!source.hasImprintedCard(card)) {
-                return false;
-            }
-        } else if (property.equals("IsNotImprinted")) {
-            if (source.hasImprintedCard(card)) {
                 return false;
             }
         } else if (property.equals("IsGoaded")) {

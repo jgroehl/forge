@@ -15,6 +15,7 @@ import forge.card.*;
 import forge.deck.Deck;
 import forge.deck.DeckProxy;
 import forge.deck.DeckgenUtil;
+import forge.game.GameType;
 import forge.gui.GuiBase;
 import forge.item.PaperCard;
 import forge.localinstance.properties.ForgeConstants;
@@ -28,8 +29,7 @@ import java.io.*;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 
 /**
  * Main resource class to access files from the selected adventure
@@ -49,6 +49,9 @@ public class Config {
     private ObjectMap<PointOfInterestData, Array<Sprite>> poiSprites = new ObjectMap<>();
     private ObjectMap<String, ObjectMap<String, Array<Sprite>>> animatedSprites = new ObjectMap<>();
 
+    private final FolderDeckCatalog preconDeckCatalog = new FolderDeckCatalog("decks/starter/precon/");
+    private final FolderDeckCatalog commanderPreconDeckCatalog = new FolderDeckCatalog("decks/starter/commanderprecon/");
+
     static public Config instance() {
         if (currentConfig == null)
             currentConfig = new Config();
@@ -56,7 +59,6 @@ public class Config {
     }
 
     private Config() {
-
         String path = resPath();
         FilenameFilter planesFilter = (file, s) -> (!s.contains(".") && !s.equals(commonDirectoryName));
 
@@ -118,7 +120,6 @@ public class Config {
             e.printStackTrace();
             configData = new ConfigData();
         }
-
 
     }
 
@@ -226,7 +227,6 @@ public class Config {
     }
 
     public String[] starterEditions() {
-
         return configData.starterEditions;
     }
 
@@ -239,14 +239,28 @@ public class Config {
                     }
                 }
             case Standard:
-
+                // Check for edition-specific starter decks first
+                if (starterEdition != null && configData.starterDecksByEdition != null) {
+                    ObjectMap<String, String> editionDecks = configData.starterDecksByEdition.get(starterEdition.getCode());
+                    if (editionDecks != null) {
+                        for (ObjectMap.Entry<String, String> entry : editionDecks) {
+                            if (ColorSet.fromNames(entry.key.toCharArray()).getColor() == color.getColor()) {
+                                return CardUtil.getDeck(entry.value, false, false, "", false, false);
+                            }
+                        }
+                    }
+                }
+                // Fall back to default starter decks (JSON generation with edition filter)
                 for (ObjectMap.Entry<String, String> entry : difficultyData.starterDecks) {
                     if (ColorSet.fromNames(entry.key.toCharArray()).getColor() == color.getColor()) {
                         return CardUtil.getDeck(entry.value, false, false, "", false, false, starterEdition, true);
                     }
                 }
             case Chaos:
-                return DeckgenUtil.getRandomOrPreconOrThemeDeck("", false, false, false);
+                if ("Commander".equalsIgnoreCase(configData.chaosDeckFormat)) {
+                    return DeckgenUtil.generateCommanderDeck(false, GameType.Commander);
+                }
+                return DeckgenUtil.getRandomOrPreconOrThemeDeck("", false, false, false, configData.allowedEditions);
             case Custom:
                 return DeckProxy.getAllCustomStarterDecks().get(index).getDeck();
             case Pile:
@@ -260,7 +274,20 @@ public class Config {
                     if (ColorSet.fromNames(entry.key.toCharArray()).getColor() == color.getColor()) {
                         return CardUtil.getDeck(entry.value, false, false, "", false, false);
                     }
-                };
+                }
+                return null;
+            case Precon:
+                String preconPath = getPreconDeckPath(index);
+                if (preconPath != null) {
+                    return CardUtil.getDeck(preconPath, false, false, "", false, false);
+                }
+                return null;
+            case CommanderPrecon:
+                String commanderPreconPath = getCommanderPreconDeckPath(index);
+                if (commanderPreconPath != null) {
+                    return CardUtil.getDeck(commanderPreconPath, false, false, "", false, false);
+                }
+                return null;
         }
         return null;
     }
@@ -336,6 +363,16 @@ public class Config {
             adventures.set(i, "<user>" + adventures.get(i));
         }
         adventures.addAll(this.adventures);
+
+        // A hard-coded list of planes that are currently not finished and are considered to be in development
+        // (these planes will only appear in the choice box if Developer Mode is enabled in Forge)
+        // TODO: migrate this to an externally configurable ini or json file
+        if (!FModel.getPreferences().getPrefBoolean(ForgePreferences.FPref.DEV_MODE_ENABLED)) {
+            adventures.removeValue("Amonkhet", false);
+            adventures.removeValue("Innistrad", false);
+            adventures.removeValue("Crystal_Kingdoms", false);
+        }
+
         return adventures;
     }
 
@@ -347,7 +384,177 @@ public class Config {
 
     }
 
+    // --- Folder-backed starter deck support ---
+
+    private static final class FolderDeckCatalog {
+        private final String folderPath;
+        private Array<String> setNames;
+        private Array<Array<String>> deckNames;
+        private Array<Array<String>> deckPaths;
+        private Array<String> currentPaths;
+        private boolean scanned = false;
+
+        private FolderDeckCatalog(String folderPath) {
+            this.folderPath = folderPath;
+        }
+
+        private void ensureScanned(String prefix, String commonPrefix) {
+            if (scanned) {
+                return;
+            }
+            scanned = true;
+            scan(prefix, commonPrefix);
+        }
+
+        private void scan(String prefix, String commonPrefix) {
+            if (!scanRoot(prefix)) {
+                scanRoot(commonPrefix);
+            }
+        }
+
+        private boolean scanRoot(String rootPrefix) {
+            String dirPath = rootPrefix + folderPath;
+            File dir = new File(dirPath);
+            if (!dir.exists() || !dir.isDirectory()) {
+                return false;
+            }
+
+            File[] dckFiles = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".dck"));
+            if (dckFiles == null || dckFiles.length == 0) {
+                return false;
+            }
+
+            TreeMap<String, List<String[]>> setMap = new TreeMap<>();
+            for (File file : dckFiles) {
+                String filename = file.getName();
+                String nameNoExt = filename.substring(0, filename.length() - 4);
+                int dash = nameNoExt.indexOf(" - ");
+                String setDisplayName = "";
+                String deckName;
+                if (dash >= 0) {
+                    CardEdition edition = FModel.getMagicDb().getEditions().get(nameNoExt.substring(0, dash));
+                    if (edition != null) {
+                        setDisplayName = edition.getName();
+                    }
+                    deckName = nameNoExt.substring(dash + 3);
+                } else {
+                    deckName = nameNoExt;
+                }
+                setMap.computeIfAbsent(setDisplayName, k -> new ArrayList<>())
+                        .add(new String[]{deckName, folderPath + filename});
+            }
+            for (List<String[]> decks : setMap.values()) {
+                decks.sort(Comparator.comparing(a -> a[0]));
+            }
+
+            setNames = new Array<>();
+            deckNames = new Array<>();
+            deckPaths = new Array<>();
+
+            setNames.add("All Editions");
+            Array<String> allNames = new Array<>();
+            Array<String> allPaths = new Array<>();
+            for (List<String[]> decks : setMap.values()) {
+                for (String[] deck : decks) {
+                    allNames.add(deck[0]);
+                    allPaths.add(deck[1]);
+                }
+            }
+            deckNames.add(allNames);
+            deckPaths.add(allPaths);
+
+            for (Map.Entry<String, List<String[]>> entry : setMap.entrySet()) {
+                if (entry.getKey().isEmpty()) {
+                    continue;
+                }
+                setNames.add(entry.getKey());
+                Array<String> names = new Array<>();
+                Array<String> paths = new Array<>();
+                for (String[] deck : entry.getValue()) {
+                    names.add(deck[0]);
+                    paths.add(deck[1]);
+                }
+                deckNames.add(names);
+                deckPaths.add(paths);
+            }
+            currentPaths = allPaths;
+            return true;
+        }
+
+        private boolean hasDecks(String prefix, String commonPrefix) {
+            ensureScanned(prefix, commonPrefix);
+            return setNames != null && setNames.size > 0;
+        }
+
+        private Array<String> getSetNames(String prefix, String commonPrefix) {
+            ensureScanned(prefix, commonPrefix);
+            return setNames;
+        }
+
+        private Array<String> filterDecks(String prefix, String commonPrefix, int setIndex) {
+            ensureScanned(prefix, commonPrefix);
+            Array<String> result = new Array<>();
+            result.add(Forge.getLocalizer().getMessage("lblRandomDeck"));
+            if (deckPaths == null || deckPaths.size == 0) {
+                return result;
+            }
+            if (setIndex < 0 || setIndex >= deckPaths.size) {
+                setIndex = 0;
+            }
+            currentPaths = deckPaths.get(setIndex);
+            result.addAll(deckNames.get(setIndex));
+            return result;
+        }
+
+        private String getDeckPath(String prefix, String commonPrefix, int deckIndex) {
+            ensureScanned(prefix, commonPrefix);
+            if (currentPaths == null || currentPaths.size == 0) {
+                return null;
+            }
+            if (deckIndex <= 0) {
+                return currentPaths.get(new Random().nextInt(currentPaths.size));
+            }
+            int idx = deckIndex - 1;
+            return idx < currentPaths.size ? currentPaths.get(idx) : null;
+        }
+    }
+
+    public boolean hasPreconDecks() {
+        return preconDeckCatalog.hasDecks(prefix, commonPrefix);
+    }
+
+    public Array<String> getPreconSetNames() {
+        return preconDeckCatalog.getSetNames(prefix, commonPrefix);
+    }
+
+    /** Filters deck list by set index. Returns deck names with "Random" prepended for colorId. */
+    public Array<String> filterPreconDecks(int setIndex) {
+        return preconDeckCatalog.filterDecks(prefix, commonPrefix, setIndex);
+    }
+
+    /** Resolves deck path from colorId index. Index 0 = random from current filter. */
+    public String getPreconDeckPath(int deckIndex) {
+        return preconDeckCatalog.getDeckPath(prefix, commonPrefix, deckIndex);
+    }
+
+    public boolean hasCommanderPreconDecks() {
+        return commanderPreconDeckCatalog.hasDecks(prefix, commonPrefix);
+    }
+
+    public Array<String> getCommanderPreconSetNames() {
+        return commanderPreconDeckCatalog.getSetNames(prefix, commonPrefix);
+    }
+
+    public Array<String> filterCommanderPreconDecks(int setIndex) {
+        return commanderPreconDeckCatalog.filterDecks(prefix, commonPrefix, setIndex);
+    }
+
+    public String getCommanderPreconDeckPath(int deckIndex) {
+        return commanderPreconDeckCatalog.getDeckPath(prefix, commonPrefix, deckIndex);
+    }
+
     public void loadResources() {
+        AdventureOverrides.instance().load(prefix, FModel.getMagicDb().getEditions(), configData);
         RewardData.getAllCards();//initialize before loading custom cards
         final CardRules.Reader rulesReader = new CardRules.Reader();
         ImageKeys.ADVENTURE_CARD_PICS_DIR = Config.currentConfig.getCommonFilePath(forge.adventure.util.Paths.CUSTOM_CARDS_PICS);// not the cleanest solution

@@ -36,11 +36,11 @@ public final class ForgeConstants {
     public static final String ASSETS_DIR                       = GuiBase.getInterface().getAssetsDir();
     public static final String PROFILE_FILE                     = ASSETS_DIR + "forge.profile.properties";
     public static final String PROFILE_TEMPLATE_FILE            = PROFILE_FILE + ".example";
-    public static final Integer DEFAULT_SERVER_CONNECTION_PORT  = 36743;
 
     public static final String RES_DIR                      = ASSETS_DIR + "res" + PATH_SEPARATOR;
     public static final String ADVENTURE_DIR                = RES_DIR + "adventure" + PATH_SEPARATOR;
     public static final String ADVENTURE_COMMON_DIR         = ADVENTURE_DIR + "common" + PATH_SEPARATOR;
+    public static final String ADVENTURE_COMMON_LIST_DIR   = ADVENTURE_COMMON_DIR  + "list" + PATH_SEPARATOR;
     public static final String LISTS_DIR                    = RES_DIR + "lists" + PATH_SEPARATOR;
     public static final String SETLOOKUP_DIR                = RES_DIR + "setlookup" + PATH_SEPARATOR;
     public static final String KEYWORD_LIST_FILE                     = LISTS_DIR + "NonStackingKWList.txt";
@@ -73,7 +73,7 @@ public final class ForgeConstants {
     public static final String NET_ARCHIVE_LEGACY_DECKS_LIST_FILE    = LISTS_DIR + "net-decks-archive-legacy.txt";
     public static final String NET_ARCHIVE_VINTAGE_DECKS_LIST_FILE   = LISTS_DIR + "net-decks-archive-vintage.txt";
     public static final String NET_ARCHIVE_BLOCK_DECKS_LIST_FILE     = LISTS_DIR + "net-decks-archive-block.txt";
-
+    public static final String ADVENTURE_BOOSTER_PRICE_FILE 		 = ADVENTURE_COMMON_LIST_DIR + "adventure-booster-price.txt";
 
     public static final String CHANGES_FILE                 = ASSETS_DIR + "README.txt";
     public static final String CHANGES_FILE_NO_RELEASE      = ASSETS_DIR + "CHANGES.txt";
@@ -93,6 +93,7 @@ public final class ForgeConstants {
     public static final String AI_PROFILE_DIR               = RES_DIR + "ai" + PATH_SEPARATOR;
     public static final String SOUND_DIR                    = "sound" + PATH_SEPARATOR;
     public static final String MUSIC_DIR                    = "music" + PATH_SEPARATOR;
+    public static final String SKIN_DIR                     = "skin" + PATH_SEPARATOR;
     public static final String ADVENTURE_COMMON_MUSIC_DIR   = ADVENTURE_COMMON_DIR + "music" + PATH_SEPARATOR;
     public static final String LANG_DIR                     = RES_DIR + "languages" + PATH_SEPARATOR;
     public static final String EFFECTS_DIR                  = RES_DIR + "effects" + PATH_SEPARATOR;
@@ -240,6 +241,7 @@ public final class ForgeConstants {
     public static final String USER_GAMES_DIR             = USER_DIR + "games" + PATH_SEPARATOR;
     public static final String USER_PUZZLE_DIR            = USER_DIR + "puzzle" + PATH_SEPARATOR;
     public static final String LOG_FILE                   = USER_DIR + "forge.log";
+    public static final String NETWORK_LOGS_DIR           = USER_DIR + "networklogs" + PATH_SEPARATOR;
     public static final String ACHIEVEMENTS_DIR           = USER_DIR + "achievements" + PATH_SEPARATOR;
     public static final String USER_CUSTOM_DIR            = USER_DIR + "custom" + PATH_SEPARATOR;
     public static final String USER_CUSTOM_EDITIONS_DIR   = USER_CUSTOM_DIR + "editions" + PATH_SEPARATOR;
@@ -271,6 +273,7 @@ public final class ForgeConstants {
     public static final String ITEM_VIEW_PREFS_FILE       = USER_PREFS_DIR + "item_view.preferences";
     public static final String CLOSE_CONN_COMMAND         = "<<_EM_ESOLC_<<";
     public static final String INVALID_HOST_COMMAND       = "<<_TSOH_DILAVNI_<<";
+    public static final String CONN_ERROR_PREFIX          = "<<_CONN_ERROR_>>:";
 
     // data that has defaults in the program dir but overrides/additions in the user dir
     private static final String _DEFAULTS_DIR = RES_DIR + "defaults" + PATH_SEPARATOR;

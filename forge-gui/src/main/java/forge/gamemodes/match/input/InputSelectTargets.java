@@ -4,12 +4,12 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import forge.game.GameEntity;
+import forge.game.GameEntityView;
 import forge.game.GameObject;
 import forge.game.ability.ApiType;
 import forge.game.card.Card;
 import forge.game.card.CardView;
 import forge.game.player.Player;
-import forge.game.player.PlayerView;
 import forge.game.spellability.SpellAbility;
 import forge.game.spellability.TargetRestrictions;
 import forge.gui.FThreads;
@@ -20,11 +20,11 @@ import forge.player.PlayerControllerHuman;
 import forge.player.PlayerZoneUpdate;
 import forge.player.PlayerZoneUpdates;
 import forge.util.*;
-import org.apache.commons.lang3.ObjectUtils;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -71,7 +71,7 @@ public final class InputSelectTargets extends InputSyncronizedBase {
         FThreads.invokeInEdtNowOrLater(() -> {
             for (final GameEntity c : targets) {
                 if (c instanceof Card) {
-                    controller.getGui().setUsedToPay(CardView.get((Card) c), true);
+                    controller.getGui().setHighlighted(GameEntityView.get(c), true);
                 }
             }
             controller.getGui().updateZones(zonesToUpdate);
@@ -114,7 +114,7 @@ public final class InputSelectTargets extends InputSyncronizedBase {
             sb.append(sa.getUniqueTargets());
         }
 
-        final int maxTargets = ObjectUtils.firstNonNull(numTargets, sa.getMaxTargets());
+        final int maxTargets = Objects.requireNonNullElse(numTargets, sa.getMaxTargets());
         final int targeted = sa.getTargets().size();
         if (maxTargets > 1) {
             sb.append(TextUtil.concatNoSpace("\n(", String.valueOf(maxTargets - targeted), " more can be targeted)"));
@@ -382,14 +382,11 @@ public final class InputSelectTargets extends InputSyncronizedBase {
 
     private void addTarget(final GameEntity ge) {
         sa.getTargets().add(ge);
-        if (ge instanceof Card) {
-            getController().getGui().setUsedToPay(CardView.get((Card) ge), true);
-            lastTarget = (Card) ge;
-        }
-        else if (ge instanceof Player) {
-            getController().getGui().setHighlighted(PlayerView.get((Player) ge), true);
-        }
         targets.add(ge);
+        if (ge instanceof Card c) {
+            lastTarget = c;
+        }
+        getController().getGui().setHighlighted(GameEntityView.get(ge), true);
 
         if (hasAllTargets()) {
             bOk = true;
@@ -410,27 +407,19 @@ public final class InputSelectTargets extends InputSyncronizedBase {
         }
         targets.remove(ge);
         sa.getTargets().remove(ge);
-        if (ge instanceof Card c) {
-            getController().getGui().setUsedToPay(CardView.get(c), false);
+        if (ge instanceof Card) {
             // try to get last selected card
             lastTarget = Iterables.getLast(IterableUtil.filter(targets, Card.class), null);
         }
-        else if (ge instanceof Player p) {
-            getController().getGui().setHighlighted(PlayerView.get(p), false);
-        }
+        getController().getGui().setHighlighted(GameEntityView.get(ge), false);
 
         this.showMessage();
     }
 
     private void done() {
-        for (final GameEntity c : targets) {
+        for (final GameEntity ge : targets) {
             //getController().macros().addRememberedAction(new TargetEntityAction(c.getView()));
-            if (c instanceof Card) {
-                getController().getGui().setUsedToPay(CardView.get((Card) c), false);
-            }
-            else if (c instanceof Player) {
-                getController().getGui().setHighlighted(PlayerView.get((Player) c), false);
-            }
+            getController().getGui().setHighlighted(GameEntityView.get(ge), false);
         }
 
         this.stop();
