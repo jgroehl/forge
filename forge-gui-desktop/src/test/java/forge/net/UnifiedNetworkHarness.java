@@ -11,11 +11,13 @@ import forge.gamemodes.match.GameLobby.GameLobbyData;
 import forge.gamemodes.match.HostedMatch;
 import forge.gamemodes.match.LobbySlot;
 import forge.gamemodes.match.LobbySlotType;
+import forge.gamemodes.net.ChatMessage;
 import forge.util.IHasForgeLog;
 import forge.gamemodes.net.NetworkByteTracker;
 import forge.gamemodes.net.NetworkLogConfig;
 import forge.gamemodes.net.client.ClientGameLobby;
 import forge.gamemodes.net.server.FServerManager;
+import forge.gamemodes.net.server.RemoteClient;
 import forge.gamemodes.net.server.ServerGameLobby;
 import forge.interfaces.ILobbyListener;
 
@@ -496,7 +498,7 @@ public class UnifiedNetworkHarness implements IHasForgeLog {
             }
 
             @Override
-            public void message(String source, String message) {
+            public void message(String source, String message, ChatMessage.MessageType type) {
                 netLog.info("Lobby message from {}: {}", source, message);
             }
 
@@ -661,9 +663,15 @@ public class UnifiedNetworkHarness implements IHasForgeLog {
         for (int i = 1; i <= remoteClientCount; i++) {
             LobbySlot slot = lobby.getSlot(i);
             String playerName = slot.getName();
-            server.convertToAI(i, playerName);
-            netLog.info("  Slot {} ({}): converted to AI via server.convertToAI",
-                    i, playerName);
+            RemoteClient client = server.findClientByIndex(i);
+            if (client != null) {
+                server.convertToAI(client);
+                netLog.info("  Slot {} ({}): converted to AI via server.convertToAI",
+                        i, playerName);
+            } else {
+                netLog.warn("  Slot {} ({}): no connected client found, skipping",
+                        i, playerName);
+            }
         }
     }
 

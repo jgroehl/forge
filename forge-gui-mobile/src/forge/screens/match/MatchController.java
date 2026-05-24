@@ -16,11 +16,11 @@ import forge.item.IPaperCard;
 import forge.util.collect.FCollection;
 import org.apache.commons.lang3.StringUtils;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 
 import forge.Forge;
 import forge.Graphics;
+import forge.GuiMobile;
 import forge.LobbyPlayer;
 import forge.assets.FImage;
 import forge.assets.FSkin;
@@ -39,10 +39,13 @@ import forge.game.player.IHasIcon;
 import forge.game.player.PlayerView;
 import forge.game.spellability.SpellAbilityView;
 import forge.game.zone.ZoneType;
+import forge.gamemodes.match.YieldMarker;
 import forge.gamemodes.net.NetworkGuiGame;
 import forge.gamemodes.match.HostedMatch;
+import forge.interfaces.IGameController;
 import forge.gui.FThreads;
 import forge.gui.GuiBase;
+import forge.gui.interfaces.IGuiGame.OrderResult;
 import forge.gui.util.SGuiChoose;
 import forge.gui.util.SOptionPane;
 import forge.item.PaperCard;
@@ -512,8 +515,8 @@ public class MatchController extends NetworkGuiGame {
     }
 
     @Override
-    public void setSelectables(final Iterable<CardView> cards) {
-        super.setSelectables(cards);
+    public void setSelectables(final Iterable<CardView> cards, final int min, final int max) {
+        super.setSelectables(cards, min, max);
         // update zones on tabletop and floating zones - non-selectable cards may be rendered differently
         FThreads.invokeInEdtNowOrLater(() -> {
             for (final PlayerView p : getGameView().getPlayers()) {
@@ -563,13 +566,21 @@ public class MatchController extends NetworkGuiGame {
         final PhaseType[] phases = PhaseType.values();
 
         for (final VPlayerPanel panel : panels) {
-            final FPref[] keys = instance.isLocalPlayer(panel.getPlayer())
+            final PlayerView player = panel.getPlayer();
+            final FPref[] keys = instance.isLocalPlayer(player)
                     ? FPref.PHASES_HUMAN : FPref.PHASES_AI;
             final VPhaseIndicator pi = panel.getPhaseIndicator();
             for (int p = 1; p < phases.length; p++) {
-                pi.getLabel(phases[p]).setStopAtPhase(prefs.getPrefBoolean(keys[p - 1]));
+                final PhaseType phase = phases[p];
+                final VPhaseIndicator.PhaseLabel label = pi.getLabel(phase);
+                label.setStopAtPhase(prefs.getPrefBoolean(keys[p - 1]));
+                label.setOnToggled(() -> instance.pushSkipPhaseToControllers(player, phase));
+                label.setOnLongPress(() -> instance.handleYieldMarkerToggle(player, phase,
+                        () -> label.setStopAtPhase(true)));
             }
         }
+
+        instance.seedYieldStateOnHost();
     }
 
     public static void writeMatchPreferences() {
@@ -615,13 +626,7 @@ public class MatchController extends NetworkGuiGame {
 
     @Override
     public boolean confirm(final CardView c, final String question, final boolean defaultIsYes, final List<String> options) {
-        final List<String> optionsToUse;
-        if (options == null) {
-            optionsToUse = ImmutableList.of(Forge.getLocalizer().getMessage("lblYes"), Forge.getLocalizer().getMessage("lblNo"));
-        } else {
-            optionsToUse = options;
-        }
-        return FOptionPane.showCardOptionDialog(c, question, "", SOptionPane.INFORMATION_ICON, optionsToUse, defaultIsYes ? 0 : 1) == 0;
+        return FOptionPane.showCardOptionDialog(c, question, "", SOptionPane.INFORMATION_ICON, options, defaultIsYes ? 0 : 1) == 0;
     }
 
     @Override
@@ -630,8 +635,8 @@ public class MatchController extends NetworkGuiGame {
     }
 
     @Override
-    public <T> List<T> order(final String title, final String top, final int remainingObjectsMin, final int remainingObjectsMax, final List<T> sourceChoices, final List<T> destChoices, final CardView referenceCard, final boolean sideboardingMode) {
-        return GuiBase.getInterface().order(title, top, remainingObjectsMin, remainingObjectsMax, sourceChoices, destChoices);
+    public <T> OrderResult<T> order(final String title, final String top, final int remainingObjectsMin, final int remainingObjectsMax, final List<T> sourceChoices, final List<T> destChoices, final CardView referenceCard, final boolean sideboardingMode, final boolean showRememberCheckbox) {
+        return ((GuiMobile) GuiBase.getInterface()).order(title, top, remainingObjectsMin, remainingObjectsMax, sourceChoices, destChoices, showRememberCheckbox);
     }
 
     @Override
@@ -689,7 +694,47 @@ public class MatchController extends NetworkGuiGame {
 
     @Override
     public boolean isUiSetToSkipPhase(final PlayerView playerTurn, final PhaseType phase) {
+        final PlayerView master = playerTurn.getMindSlaveMaster();
+        if (master != null && view.stopAtPhase(master, phase)) {
+            return false;
+        }
         return !view.stopAtPhase(playerTurn, phase);
+    }
+
+    @Override
+    public void refreshYieldUi(final PlayerView player) {
+        FThreads.invokeInEdtNowOrLater(() -> {
+            if (view == null) {
+                return;
+            }
+            // Marker only rendered for the local player's view.
+            PlayerView local = getCurrentPlayer();
+            if (!player.equals(local)) {
+                return;
+            }
+            for (final VPlayerPanel panel : view.getPlayerPanelsList()) {
+                for (VPhaseIndicator.PhaseLabel l : panel.getPhaseIndicator().allLabels()) {
+                    l.setYieldMarked(false);
+                }
+            }
+            IGameController controller = getGameController(local);
+            YieldMarker marker = controller != null ? controller.getYieldController().getAutoPassUntilMarker() : null;
+            if (marker == null) {
+                return;
+            }
+            VPlayerPanel markedPanel = view.getPlayerPanel(marker.getPhaseOwner());
+            if (markedPanel == null) {
+                return;
+            }
+            VPhaseIndicator markedPi = markedPanel.getPhaseIndicator();
+            if (markedPi == null) {
+                return;
+            }
+            VPhaseIndicator.PhaseLabel target = markedPi.getLabel(marker.getPhase());
+            if (target != null) {
+                target.setYieldMarked(true);
+            }
+        });
     }
 
     public static HostedMatch hostMatch() {

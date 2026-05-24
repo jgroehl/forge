@@ -11,6 +11,7 @@ import forge.gamemodes.net.event.*;
 import forge.gui.interfaces.IGuiGame;
 import forge.interfaces.ILobbyListener;
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -37,7 +38,7 @@ public class FGameClient implements IToServer, IHasForgeLog {
     private volatile boolean disconnectSimulated;
     private Channel channel;
 
-    public FGameClient(String username, String roomKey, IGuiGame clientGui, String hostname, int port) {
+    public FGameClient(String username, IGuiGame clientGui, String hostname, int port) {
         this.username = username;
         this.clientGui = clientGui;
         this.hostname = hostname;
@@ -105,7 +106,19 @@ public class FGameClient implements IToServer, IHasForgeLog {
             return;
         }
         netLog.info("Client sent {}", event);
-        channel.writeAndFlush(event);
+        final CompatibleObjectEncoder encoder = channel.pipeline().get(CompatibleObjectEncoder.class);
+        if (encoder == null) {
+            netLog.error("No encoder in client pipeline for {}", event);
+            return;
+        }
+        final ByteBuf encoded;
+        try {
+            encoded = encoder.encodeToBuf(event, channel.alloc());
+        } catch (Exception e) {
+            netLog.error(e, "Client encode error for {}", event);
+            return;
+        }
+        channel.writeAndFlush(encoded);
     }
 
     /**
@@ -153,7 +166,8 @@ public class FGameClient implements IToServer, IHasForgeLog {
 
     void setGameControllers(final Iterable<PlayerView> myPlayers) {
         for (final PlayerView p : myPlayers) {
-            clientGui.setOriginalGameController(p, new NetGameController(this));
+            NetGameController controller = new NetGameController(this);
+            clientGui.setOriginalGameController(p, controller);
         }
     }
 
@@ -162,7 +176,7 @@ public class FGameClient implements IToServer, IHasForgeLog {
         public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
             if (msg instanceof MessageEvent event) {
                 for (final ILobbyListener listener : lobbyListeners) {
-                    listener.message(event.getSource(), event.getMessage());
+                    listener.message(event.getSource(), event.getMessage(), event.getType());
                 }
             }
             super.channelRead(ctx, msg);
@@ -176,6 +190,29 @@ public class FGameClient implements IToServer, IHasForgeLog {
                 for (final ILobbyListener listener : lobbyListeners) {
                     listener.update(event.getState(), event.getSlot());
                 }
+            } else if (msg instanceof ReceiveEventPoolEvent event) {
+                for (final ILobbyListener listener : lobbyListeners) {
+                    listener.receiveEventPool(event.getEventId(), event.getPool());
+                }
+                return;
+            } else if (msg instanceof DraftAutoPickedEvent event) {
+                for (final ILobbyListener listener : lobbyListeners) {
+                    listener.draftAutoPicked(event.getSeatIndex(), event.getCard(),
+                            event.getPackNumber(), event.getPickInPack());
+                }
+                return;
+            } else if (msg instanceof DraftPackArrivedEvent event) {
+                for (final ILobbyListener listener : lobbyListeners) {
+                    listener.draftPackArrived(event.getSeatIndex(), event.getPack(),
+                            event.getPackNumber(), event.getPickNumber(),
+                            event.getTimerDurationSeconds());
+                }
+                return;
+            } else if (msg instanceof DraftSeatPickedEvent event) {
+                for (final ILobbyListener listener : lobbyListeners) {
+                    listener.draftSeatPicked(event.getSeatIndex(), event.getSeatQueueDepths());
+                }
+                return;
             }
             super.channelRead(ctx, msg);
         }

@@ -902,7 +902,7 @@
     ],
     "ai": "",
     "speed": 45,
-    "scale": 6,
+    "scale": 3,
     "life": 70,
     "rewards": [
       {
@@ -1050,7 +1050,7 @@
     ],
     "ai": "",
     "speed": 45,
-    "scale": 3,
+    "scale": 2,
     "life": 70,
     "rewards": [
       {
@@ -2055,7 +2055,7 @@
       {
         "type": "item",
         "count": 1,
-        "itemName": "Pilgrim's CloakPi"
+        "itemName": "Pilgrim's Cloak"
       },
       {
         "type": "card",
@@ -2125,7 +2125,7 @@
       {
         "type": "item",
         "count": 1,
-        "itemName": "Opal Armor"
+        "itemName": "Opal Cloak"
       },
       {
         "type": "item",
@@ -59271,17 +59271,22 @@
     "ai": "",
     "scale": 0.5,
     "speed": 45,
-    "life": 20,
+    "life": 30,
     "rewards": [
-     {
+      {
+        "type": "card",
+        "count": 1,
+        "cardName": "Cragflame"
+      },
+      {
         "type": "card",
         "count": 1,
         "cardName": "Mabel, Heir to Cragflame"
       },
       {
         "type": "deckCard",
-        "count": 1,
-        "addMaxCount": 3,
+        "count": 2,
+        "addMaxCount": 4,
         "rarity": [
           "Rare",
           "Mythic Rare"
@@ -59298,8 +59303,8 @@
       },
       {
         "type": "randomCard",
-        "count": 1,
-        "addMaxCount": 3,
+        "count": 2,
+        "addMaxCount": 4,
         "rarity": [
           "Rare",
           "Mythic Rare"

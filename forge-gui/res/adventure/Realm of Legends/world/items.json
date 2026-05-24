@@ -1269,6 +1269,7 @@
       "equipmentSlot": "Boots",
       "iconName": "Witch-MawAnklet",
       "effect": {
+        "changeStartCards": -1,
         "lifeModifier": -8,
         "startBattleWithCard": [
           "Witch-Maw Nephilim|GPT"
@@ -1629,7 +1630,7 @@
   },
     {
     "name": "Gingerboots",
-    "description": "1/1 artifact with hate, pay 1 to give semi-unblockable, pay 2 to eat food for 3 life",
+    "description": "1/1 artifact with haste, pay 1 to give semi-unblockable, pay 2 to eat food for 3 life",
     "equipmentSlot": "Boots",
     "iconName": "Gingerboots",
     "effect": {
@@ -1853,6 +1854,18 @@
     }
   },
   {
+    "name": "Cragflame",
+    "description": "Equip 2, +1/+1 vigilance, trample, and haste.",
+    "equipmentSlot": "Right",
+    "iconName": "Cragflame",
+    "effect": {
+      "lifeModifier": -6,
+      "startBattleWithCard": [
+        "cragflame"
+      ]
+    }
+  },
+  {
     "name": "Spore Skirt",
     "description": "0/1 flying wall, taps down for 4 turns on block.",
     "equipmentSlot": "Boots",
@@ -2016,7 +2029,6 @@
     "iconName": "TomeofFire",
     "cost": 5000,
     "effect": {
-        "lifeModifier": -2,
         "startBattleWithCard": [
         "Seal of Fire|NEM"
      ]
@@ -3626,7 +3638,6 @@
     "equipmentSlot": "Right",
     "iconName": "StriderReins",
     "effect": {
-        "lifeModifier": -3,
         "startBattleWithCard": [
         "Strider Harness|RIX"
      ]
@@ -4149,7 +4160,7 @@
     "equipmentSlot": "Body",
     "iconName": "OpalCloak",
     "effect": {
-      "lifeModifier": -5,
+      "lifeModifier": -3,
       "startBattleWithCard": [
         "Opal Palace|C13"
      ]
@@ -4326,7 +4337,7 @@
     "equipmentSlot": "Body",
     "iconName": "SeraphimWings",
     "effect": {
-        "changeStartCards": -1,
+      "lifeModifier": -5,
         "startBattleWithCard": [
         "Seraph Sanctuary|AVR"
      ]
@@ -4372,7 +4383,7 @@
   },
     {
     "name": "Commander's Robes",
-    "description": "Taps for any color of your commander; no hand size penalty",
+    "description": "Taps for any color of your commander; no penalties",
     "equipmentSlot": "Body",
     "iconName": "Commander'sRobes",
     "effect": {
@@ -5065,7 +5076,7 @@
   {
     "name": "Winter Boots",
     "description": "0/4, T, sac: -0/-X where X is snow lands",
-    "equipmentSlot": "Body",
+    "equipmentSlot": "Boots",
     "iconName": "WinterBoots",
     "effect": {
       "startBattleWithCard": [
@@ -5152,7 +5163,7 @@
     "description": "Grants a 1/1 white/black spirit token with flying in a special slot.",
     "equipmentSlot": "Token",
     "iconName": "TokenofSoaringSpirit",
-    "cost": 100000,
+    "cost": 80000,
     "effect": {
       "startBattleWithCard": [
         "wb_1_1_spirit_flying"

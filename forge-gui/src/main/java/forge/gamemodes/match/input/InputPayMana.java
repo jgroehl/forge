@@ -19,7 +19,6 @@ import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
 import forge.game.spellability.SpellAbilityView;
 import forge.gui.FThreads;
-import forge.gui.GuiBase;
 import forge.player.PlayerControllerHuman;
 import forge.util.Evaluator;
 import forge.util.ITriggerEvent;
@@ -76,7 +75,7 @@ public abstract class InputPayMana extends InputSyncronizedBase {
 
     @Override
     protected boolean onCardSelected(final Card card, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
-        if (GuiBase.getInterface().isLibgdxPort()) {
+        if (getController().getGui().isLibgdxPort()) {
             // Mobile Forge allows to tap cards underneath the current card even if the current one is tapped
             if (otherCardsToSelect != null) {
                 for (Card c : otherCardsToSelect) {
@@ -96,14 +95,14 @@ public abstract class InputPayMana extends InputSyncronizedBase {
             List<SpellAbility> manaAbilities = getAllManaAbilities(card);
             // Desktop Forge floating menu functionality
             if (manaAbilities.size() == 1) {
-                activateManaAbility(card, manaAbilities.get(0));
+                return activateManaAbility(card, manaAbilities.get(0));
             } else {
                 SpellAbility spellAbility = getController().getAbilityToPlay(card, manaAbilities, triggerEvent);
                 if (spellAbility != null) {
-                    activateManaAbility(card, spellAbility);
+                    return activateManaAbility(card, spellAbility);
                 }
             }
-            return true;
+            return false;
         }
     }
 
@@ -446,6 +445,8 @@ public abstract class InputPayMana extends InputSyncronizedBase {
     }
 
     public boolean isPaid() { return bPaid; }
+
+    public boolean isActivatingManaAbility() { return locked; }
 
     protected String messagePrefix;
     public void setMessagePrefix(String prompt) {
