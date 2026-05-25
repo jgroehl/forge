@@ -7,6 +7,7 @@ import com.google.common.collect.Multimap;
 import forge.LobbyPlayer;
 import forge.card.ColorSet;
 import forge.card.ICardFace;
+import forge.card.MagicColor;
 import forge.card.mana.ManaCost;
 import forge.card.mana.ManaCostShard;
 import forge.deck.Deck;
@@ -45,20 +46,6 @@ import java.util.function.Predicate;
  * PlayerController that routes strategic decisions to an external LLM agent
  * (via ExternalAgentClient) and delegates mechanical/trivial decisions to the
  * built-in PlayerControllerAi as a super.
- *
- * PROTOTYPE — routes the following decisions externally:
- *   - chooseSpellAbilityToPlay (what to cast / activate)
- *   - declareAttackers (which creatures attack)
- *   - chooseSingleEntityForEffect (targeting)
- *   - chooseCardsForEffect (choosing cards for an effect)
- *   - choosePermanentsToSacrifice (what to sacrifice)
- *   - chooseCardsToDiscardFrom (what to discard)
- *   - confirmAction (yes/no strategic decisions)
- *   - confirmTrigger (whether to use optional triggers)
- *   - mulliganKeepHand (mulligan decision)
- *   - arrangeForScry / arrangeForSurveil
- *
- * Everything else falls through to the heuristic AI.
  */
 public class PlayerControllerExternal extends PlayerControllerAi {
 
@@ -68,7 +55,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
                                     String agentUrl, String modelName) {
         super(game, p, lp);
-        this.brains = getAi();  // inherited from PlayerControllerAi
+        this.brains = getAi();
         this.agent = new ExternalAgentClient(agentUrl, modelName);
     }
 
@@ -85,14 +72,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return buildManualGameState();
     }
 
-    /**
-     * Lightweight manual game state for early game (mulligans) or
-     * when GameState.initFromGame() fails.
-     */
     private String buildManualGameState() {
         StringBuilder sb = new StringBuilder();
 
-        // Phase
         PhaseType ph = getGame().getPhaseHandler().getPhase();
         sb.append("turn=").append(getGame().getPhaseHandler().getTurn());
         sb.append(" phase=").append(ph != null ? ph.toString() : "PREGAME");
@@ -119,7 +101,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             sb.append("\n");
 
-            // Hand
             sb.append(tag).append("_hand: ");
             if (isMe) {
                 List<String> handCards = new ArrayList<>();
@@ -136,7 +117,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             sb.append("\n");
 
-            // Battlefield
             sb.append(tag).append("_board: ");
             List<String> boardCards = new ArrayList<>();
             for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
@@ -145,7 +125,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             sb.append(boardCards.isEmpty() ? "empty" : String.join(", ", boardCards));
             sb.append("\n");
 
-            // Graveyard
             CardCollectionView grave = p.getCardsIn(ZoneType.Graveyard);
             if (!grave.isEmpty()) {
                 sb.append(tag).append("_grave: ");
@@ -158,7 +137,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
         }
 
-        // Combat info
         Combat combat = getGame().getCombat();
         if (combat != null && !combat.getAttackers().isEmpty()) {
             sb.append("COMBAT:\n");
@@ -182,7 +160,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
         }
 
-        // Stack
         if (!getGame().getStack().isEmpty()) {
             sb.append("stack: ");
             for (SpellAbilityStackInstance si : getGame().getStack()) {
@@ -274,7 +251,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             prefix = "Cast ";
             desc = c.getType().toString() + " " + c.getOracleText().replace("\\n", " ");
         }
-
         return prefix + c.getName() + ": " + desc;
     }
 
@@ -298,7 +274,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             actions.add("PASS (do nothing, pass priority)");
 
             List<Object> actionSources = new ArrayList<>();
-            actionSources.add(null); // PASS
+            actionSources.add(null);
 
             if (lands != null && !lands.isEmpty()) {
                 for (Card land : lands) {
@@ -309,7 +285,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
-                // Check if AI is willing AND can actually pay the cost
                 if (!brains.canPlaySa(sa).willingToPlay()) continue;
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
 
@@ -364,14 +339,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             } else if (defenders.size() == 1) {
                 defender = defenders.get(0);
             } else {
-                // Multiple defenders (multiplayer) — ask LLM who to attack
                 String gameState = serializeGameState();
                 List<String> options = new ArrayList<>();
                 for (GameEntity d : defenders) {
                     if (d instanceof Player p) {
                         options.add(p.getName() + " (" + p.getLife() + " life)");
                     } else {
-                        options.add(d.toString()); // planeswalker
+                        options.add(d.toString());
                     }
                 }
                 int choice = agent.chooseAction(gameState + "\nCONTEXT: Choose who to attack", options);
@@ -408,9 +382,59 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
     }
 
+    // ---------------------------------------------------------------
+    // DECLARE BLOCKERS (LLM-routed)
+    // ---------------------------------------------------------------
     @Override
     public void declareBlockers(Player defender, Combat combat) {
-        super.declareBlockers(defender, combat);
+        try {
+            if (combat.getAttackers().isEmpty()) return;
+
+            CardCollection possibleBlockers = new CardCollection();
+            for (Card c : player.getCreaturesInPlay()) {
+                if (!c.isTapped()) {
+                    possibleBlockers.add(c);
+                }
+            }
+
+            if (possibleBlockers.isEmpty()) return;
+
+            String gameState = serializeGameState();
+
+            for (Card attacker : combat.getAttackers()) {
+                List<Card> legalBlockers = new ArrayList<>();
+                for (Card blocker : possibleBlockers) {
+                    if (CombatUtil.canBlock(attacker, blocker, combat)) {
+                        legalBlockers.add(blocker);
+                    }
+                }
+
+                if (legalBlockers.isEmpty()) continue;
+
+                List<String> options = new ArrayList<>();
+                for (Card b : legalBlockers) {
+                    options.add(cardToStringCompact(b));
+                }
+
+                String context = "Attacker: " + cardToStringCompact(attacker)
+                        + " (controlled by " + attacker.getController().getName() + ")"
+                        + "\nChoose creatures to block with, or NONE to let it through."
+                        + "\nConsider: will your blocker survive? Is it worth trading?";
+
+                List<Integer> chosen = agent.chooseSubset(gameState, options, context);
+
+                for (int idx : chosen) {
+                    if (idx >= 0 && idx < legalBlockers.size()) {
+                        Card blocker = legalBlockers.get(idx);
+                        combat.addBlocker(attacker, blocker);
+                        possibleBlockers.remove(blocker);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logger.error(e, "External AI declareBlockers failed, falling back");
+            super.declareBlockers(defender, combat);
+        }
     }
 
     @Override
@@ -692,6 +716,291 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
     }
 
+    // ---------------------------------------------------------------
+    // CHOOSE MODE FOR ABILITY (Charms, Commands, MDFCs)
+    // ---------------------------------------------------------------
+    @Override
+    public List<AbilitySub> chooseModeForAbility(SpellAbility sa, List<AbilitySub> possible,
+                                                 int min, int num, boolean allowRepeat) {
+        try {
+            if (possible.size() <= min) {
+                return possible;
+            }
+
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            for (AbilitySub mode : possible) {
+                String desc = mode.getDescription();
+                if (desc == null || desc.isEmpty()) {
+                    desc = mode.toString();
+                }
+                options.add(desc);
+            }
+
+            String context = "Choose " + min + " to " + num + " modes for "
+                    + sa.getHostCard().getName() + "."
+                    + (allowRepeat ? " You may choose the same mode more than once." : "");
+
+            List<Integer> chosen = agent.chooseSubset(
+                    gameState + "\nCONTEXT: " + context, options,
+                    "Choose the most impactful modes for the current game state.");
+
+            List<AbilitySub> result = new ArrayList<>();
+            for (int idx : chosen) {
+                if (idx >= 0 && idx < possible.size() && result.size() < num) {
+                    if (allowRepeat || !result.contains(possible.get(idx))) {
+                        result.add(possible.get(idx));
+                    }
+                }
+            }
+
+            if (result.size() < min) {
+                for (AbilitySub mode : possible) {
+                    if (!result.contains(mode) && result.size() < min) {
+                        result.add(mode);
+                    }
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseModeForAbility failed, falling back");
+            return super.chooseModeForAbility(sa, possible, min, num, allowRepeat);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // CHOOSE BINARY (yes/no decisions throughout the game)
+    // ---------------------------------------------------------------
+    @Override
+    public boolean chooseBinary(SpellAbility sa, String question,
+                                BinaryChoiceType kindOfChoice, Boolean defaultChoice) {
+        try {
+            String gameState = serializeGameState();
+            String fullQuestion = question;
+            if (sa != null && sa.getHostCard() != null) {
+                fullQuestion = sa.getHostCard().getName() + " — " + question;
+            }
+            if (kindOfChoice != null) {
+                fullQuestion += " (Choice type: " + kindOfChoice + ")";
+            }
+            return agent.chooseYesNo(gameState, fullQuestion);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseBinary failed, falling back");
+            return super.chooseBinary(sa, question, kindOfChoice, defaultChoice);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // CHOOSE CARDS TO DISCARD TO MAXIMUM HAND SIZE
+    // ---------------------------------------------------------------
+    @Override
+    public CardCollection chooseCardsToDiscardToMaximumHandSize(int numDiscard) {
+        try {
+            String gameState = serializeGameState();
+            CardCollectionView hand = player.getCardsIn(ZoneType.Hand);
+
+            List<String> options = new ArrayList<>();
+            for (Card c : hand) {
+                if (c.isLand()) {
+                    options.add(c.getName());
+                } else {
+                    options.add(c.getName() + " " + c.getManaCost() + " - " + c.getOracleText());
+                }
+            }
+
+            String context = "You must discard " + numDiscard + " card(s) to get to maximum hand size."
+                    + " Choose the least useful cards to discard."
+                    + " Keep your best spells, removal, and cards that fit your game plan.";
+
+            List<Integer> chosen = agent.chooseSubset(
+                    gameState + "\nCONTEXT: " + context, options,
+                    "Choose exactly " + numDiscard + " card(s) to discard.");
+
+            CardCollection result = new CardCollection();
+            for (int idx : chosen) {
+                if (idx >= 0 && idx < hand.size() && result.size() < numDiscard) {
+                    result.add(hand.get(idx));
+                }
+            }
+
+            while (result.size() < numDiscard) {
+                for (Card c : hand) {
+                    if (!result.contains(c)) {
+                        result.add(c);
+                        break;
+                    }
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseCardsToDiscardToMaximumHandSize failed, falling back");
+            return super.chooseCardsToDiscardToMaximumHandSize(numDiscard);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // CHOOSE SINGLE SPELL FOR EFFECT (counter target, copy, etc.)
+    // ---------------------------------------------------------------
+    @Override
+    public SpellAbility chooseSingleSpellForEffect(List<SpellAbility> spells,
+                                                   SpellAbility sa, String title, Map<String, Object> params) {
+        try {
+            if (spells.size() <= 1) {
+                return spells.isEmpty() ? null : spells.get(0);
+            }
+
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            for (SpellAbility spell : spells) {
+                Card host = spell.getHostCard();
+                String desc = host.getName();
+                if (spell.getDescription() != null && !spell.getDescription().isEmpty()) {
+                    desc += ": " + spell.getDescription();
+                }
+                desc += " (controlled by " + host.getController().getName() + ")";
+                options.add(desc);
+            }
+
+            String context = title != null ? title : "Choose a spell";
+            if (sa != null && sa.getHostCard() != null) {
+                context += " (for " + sa.getHostCard().getName() + ")";
+            }
+
+            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+
+            if (choice >= 0 && choice < spells.size()) {
+                return spells.get(choice);
+            }
+            return spells.get(0);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseSingleSpellForEffect failed, falling back");
+            return super.chooseSingleSpellForEffect(spells, sa, title, params);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // CHOOSE COLOR / CHOOSE COLORS
+    // ---------------------------------------------------------------
+    @Override
+    public byte chooseColor(String message, SpellAbility sa, ColorSet colors) {
+        try {
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            List<Byte> colorBytes = new ArrayList<>();
+
+            if (colors.hasWhite()) { options.add("White"); colorBytes.add(MagicColor.WHITE); }
+            if (colors.hasBlue()) { options.add("Blue"); colorBytes.add(MagicColor.BLUE); }
+            if (colors.hasBlack()) { options.add("Black"); colorBytes.add(MagicColor.BLACK); }
+            if (colors.hasRed()) { options.add("Red"); colorBytes.add(MagicColor.RED); }
+            if (colors.hasGreen()) { options.add("Green"); colorBytes.add(MagicColor.GREEN); }
+
+            if (options.isEmpty()) {
+                return super.chooseColor(message, sa, colors);
+            }
+
+            String context = message != null ? message : "Choose a color";
+            if (sa != null && sa.getHostCard() != null) {
+                context = sa.getHostCard().getName() + " — " + context;
+            }
+            context += "\nConsider what colors your opponents are playing.";
+
+            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+
+            if (choice >= 0 && choice < colorBytes.size()) {
+                return colorBytes.get(choice);
+            }
+            return colorBytes.get(0);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseColor failed, falling back");
+            return super.chooseColor(message, sa, colors);
+        }
+    }
+
+    @Override
+    public byte chooseColorAllowColorless(String message, Card c, ColorSet colors) {
+        try {
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            List<Byte> colorBytes = new ArrayList<>();
+
+            if (colors.hasWhite()) { options.add("White"); colorBytes.add(MagicColor.WHITE); }
+            if (colors.hasBlue()) { options.add("Blue"); colorBytes.add(MagicColor.BLUE); }
+            if (colors.hasBlack()) { options.add("Black"); colorBytes.add(MagicColor.BLACK); }
+            if (colors.hasRed()) { options.add("Red"); colorBytes.add(MagicColor.RED); }
+            if (colors.hasGreen()) { options.add("Green"); colorBytes.add(MagicColor.GREEN); }
+            options.add("Colorless"); colorBytes.add(MagicColor.COLORLESS);
+
+            String context = message != null ? message : "Choose a color";
+            if (c != null) {
+                context = c.getName() + " — " + context;
+            }
+
+            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+
+            if (choice >= 0 && choice < colorBytes.size()) {
+                return colorBytes.get(choice);
+            }
+            return colorBytes.get(0);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseColorAllowColorless failed, falling back");
+            return super.chooseColorAllowColorless(message, c, colors);
+        }
+    }
+
+    @Override
+    public ColorSet chooseColors(String message, SpellAbility sa, int min, int max, ColorSet options) {
+        try {
+            String gameState = serializeGameState();
+            List<String> colorOptions = new ArrayList<>();
+            List<Byte> colorBytes = new ArrayList<>();
+
+            if (options.hasWhite()) { colorOptions.add("White"); colorBytes.add(MagicColor.WHITE); }
+            if (options.hasBlue()) { colorOptions.add("Blue"); colorBytes.add(MagicColor.BLUE); }
+            if (options.hasBlack()) { colorOptions.add("Black"); colorBytes.add(MagicColor.BLACK); }
+            if (options.hasRed()) { colorOptions.add("Red"); colorBytes.add(MagicColor.RED); }
+            if (options.hasGreen()) { colorOptions.add("Green"); colorBytes.add(MagicColor.GREEN); }
+
+            if (colorOptions.isEmpty()) {
+                return super.chooseColors(message, sa, min, max, options);
+            }
+
+            String context = (message != null ? message : "Choose colors")
+                    + " (choose " + min + " to " + max + ")";
+            if (sa != null && sa.getHostCard() != null) {
+                context = sa.getHostCard().getName() + " — " + context;
+            }
+
+            List<Integer> chosen = agent.chooseSubset(
+                    gameState + "\nCONTEXT: " + context, colorOptions,
+                    "Choose " + min + " to " + max + " colors.");
+
+            byte result = 0;
+            int count = 0;
+            for (int idx : chosen) {
+                if (idx >= 0 && idx < colorBytes.size() && count < max) {
+                    result |= colorBytes.get(idx);
+                    count++;
+                }
+            }
+
+            if (count < min) {
+                for (byte cb : colorBytes) {
+                    if ((result & cb) == 0 && count < min) {
+                        result |= cb;
+                        count++;
+                    }
+                }
+            }
+
+            return ColorSet.fromMask(result);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseColors failed, falling back");
+            return super.chooseColors(message, sa, min, max, options);
+        }
+    }
+
     // ===================================================================
     // DELEGATED TO FALLBACK AI — mechanical / trivial decisions
     // ===================================================================
@@ -750,6 +1059,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
+        // Targeting is deeply integrated with the TargetChoices system.
+        // Target selection mostly flows through chooseSingleEntityForEffect
+        // which is already LLM-routed.
         return super.chooseTargetsFor(currentAbility);
     }
 
@@ -786,12 +1098,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public List<SpellAbility> chooseSpellAbilitiesForEffect(List<SpellAbility> spells,
                                                             SpellAbility sa, String title, int num, Map<String, Object> params) {
         return super.chooseSpellAbilitiesForEffect(spells, sa, title, num, params);
-    }
-
-    @Override
-    public SpellAbility chooseSingleSpellForEffect(List<SpellAbility> spells,
-                                                   SpellAbility sa, String title, Map<String, Object> params) {
-        return super.chooseSingleSpellForEffect(spells, sa, title, params);
     }
 
     @Override
@@ -869,11 +1175,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public CardCollectionView chooseCardsToDiscardUnlessType(int num, CardCollectionView hand,
                                                              String[] uTypes, SpellAbility sa) {
         return super.chooseCardsToDiscardUnlessType(num, hand, uTypes, sa);
-    }
-
-    @Override
-    public CardCollection chooseCardsToDiscardToMaximumHandSize(int numDiscard) {
-        return super.chooseCardsToDiscardToMaximumHandSize(numDiscard);
     }
 
     @Override
@@ -987,12 +1288,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public List<AbilitySub> chooseModeForAbility(SpellAbility sa, List<AbilitySub> possible,
-                                                 int min, int num, boolean allowRepeat) {
-        return super.chooseModeForAbility(sa, possible, min, num, allowRepeat);
-    }
-
-    @Override
     public int chooseNumberForCostReduction(SpellAbility sa, int min, int max) {
         return super.chooseNumberForCostReduction(sa, min, max);
     }
@@ -1014,29 +1309,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public boolean chooseBinary(SpellAbility sa, String question,
-                                BinaryChoiceType kindOfChoice, Boolean defaultChoice) {
-        return super.chooseBinary(sa, question, kindOfChoice, defaultChoice);
-    }
-
-    @Override
     public boolean chooseFlipResult(SpellAbility sa, Player flipper, boolean call) {
         return super.chooseFlipResult(sa, flipper, call);
-    }
-
-    @Override
-    public byte chooseColor(String message, SpellAbility sa, ColorSet colors) {
-        return super.chooseColor(message, sa, colors);
-    }
-
-    @Override
-    public byte chooseColorAllowColorless(String message, Card c, ColorSet colors) {
-        return super.chooseColorAllowColorless(message, c, colors);
-    }
-
-    @Override
-    public ColorSet chooseColors(String message, SpellAbility sa, int min, int max, ColorSet options) {
-        return super.chooseColors(message, sa, min, max, options);
     }
 
     @Override
@@ -1248,16 +1522,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public void autoPassCancel() {
-        // Do nothing
     }
 
     @Override
     public void awaitNextInput() {
-        // Do nothing
     }
 
     @Override
     public void cancelAwaitNextInput() {
-        // Do nothing
     }
 }
