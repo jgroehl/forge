@@ -203,9 +203,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     private static String cardToStringCompact(Card c) {
         StringBuilder sb = new StringBuilder(c.getName());
         if (c.isCreature()) {
-            sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness());
+            sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness()).append(" ");
         }
-        if (c.isTapped()) sb.append("(T)");
+        if (c.isTapped()) sb.append("(tapped)");
         if (c.isSick()) sb.append("(sick)");
         Map<CounterType, Integer> counters = c.getCounters();
         if (!counters.isEmpty()) {
@@ -649,11 +649,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public boolean mulliganKeepHand(Player firstPlayer, int cardsToReturn) {
         try {
             String gameState = serializeGameState();
-            StringBuilder handDesc = new StringBuilder("Your hand: ");
-            for (Card c : player.getCardsIn(ZoneType.Hand)) {
-                handDesc.append(c.getName()).append(", ");
-            }
-            handDesc.append("\nCards to return if you mulligan: ").append(cardsToReturn);
+            StringBuilder handDesc = new StringBuilder("\nCards to return if you mulligan: ");
+            handDesc.append(cardsToReturn);
             return agent.chooseYesNo(gameState + "\n" + handDesc,
                     "Keep this hand? (YES = keep, NO = mulligan)");
         } catch (Exception e) {

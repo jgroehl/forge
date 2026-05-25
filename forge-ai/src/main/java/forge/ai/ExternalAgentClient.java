@@ -86,7 +86,7 @@ public class ExternalAgentClient {
     // ---------------------------------------------------------------
 
     public String chooseRaw(String prompt) {
-        String response = callLLM(prompt + "\n\nRespond with ONLY the attack assignments.");
+        String response = callLLM(prompt + "\n\nRespond with ONLY the comma-separated attack assignment pairs.");
         gameLog.append("[Raw] ").append(response.trim()).append("\n");
         return response.trim();
     }
