@@ -4,6 +4,7 @@ import forge.LobbyPlayer;
 import forge.ai.AIOption;
 import forge.ai.AiProfileUtil;
 import forge.ai.LobbyPlayerAi;
+import forge.ai.LobbyPlayerExternal;
 import forge.gui.GuiBase;
 import forge.gui.util.SOptionPane;
 import forge.localinstance.properties.ForgeNetPreferences;
@@ -66,7 +67,19 @@ public final class GamePlayerUtil {
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options) {
         return createAiPlayer(name, avatarIndex, sleeveIndex, options, "");
     }
+
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
+        // Check if an external LLM agent is configured — only for the first AI player
+        String agentUrl = System.getProperty("forge.external.agent.url");
+        if (agentUrl != null && !agentUrl.isEmpty() && name.contains("[LLM]")) {
+            String modelName = System.getProperty("forge.external.agent.model", "qwen3-vl-4b");
+            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl, modelName);
+            player.setAvatarIndex(avatarIndex);
+            player.setSleeveIndex(sleeveIndex);
+            return player;
+        }
+
+        // Standard AI player
         final LobbyPlayerAi player = new LobbyPlayerAi(name, options);
 
         // TODO: implement specific AI profiles for quest mode.
