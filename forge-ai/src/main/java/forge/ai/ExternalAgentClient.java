@@ -85,6 +85,12 @@ public class ExternalAgentClient {
     // Public decision methods
     // ---------------------------------------------------------------
 
+    public String chooseRaw(String prompt) {
+        String response = callLLM(prompt + "\n\nRespond with ONLY the attack assignments.");
+        gameLog.append("[Raw] ").append(response.trim()).append("\n");
+        return response.trim();
+    }
+
     /**
      * Choose a single action from a numbered list.
      * Returns the chosen index, or 0 (PASS) on failure.

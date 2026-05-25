@@ -332,30 +332,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public void declareAttackers(Player attacker, Combat combat) {
         try {
-            GameEntity defender;
             List<GameEntity> defenders = new ArrayList<>(combat.getDefenders());
-            if (defenders.isEmpty()) {
-                return;
-            } else if (defenders.size() == 1) {
-                defender = defenders.get(0);
-            } else {
-                String gameState = serializeGameState();
-                List<String> options = new ArrayList<>();
-                for (GameEntity d : defenders) {
-                    if (d instanceof Player p) {
-                        options.add(p.getName() + " (" + p.getLife() + " life)");
-                    } else {
-                        options.add(d.toString());
-                    }
-                }
-                int choice = agent.chooseAction(gameState + "\nCONTEXT: Choose who to attack", options);
-                defender = (choice >= 0 && choice < defenders.size()) ? defenders.get(choice) : defenders.get(0);
-            }
-            if (defender == null) return;
+            if (defenders.isEmpty()) return;
 
             CardCollection possibleAttackers = new CardCollection();
             for (Card c : player.getCreaturesInPlay()) {
-                if (CombatUtil.canAttack(c)) {
+                if (c.isCreature() && !c.isSick() && !c.isTapped()) {
                     possibleAttackers.add(c);
                 }
             }
@@ -363,17 +345,41 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             if (possibleAttackers.isEmpty()) return;
 
             String gameState = serializeGameState();
-            List<String> options = new ArrayList<>();
-            for (Card c : possibleAttackers) {
-                options.add(cardToString(c));
+
+            StringBuilder context = new StringBuilder();
+            context.append("CREATURES:\n");
+            for (int i = 0; i < possibleAttackers.size(); i++) {
+                context.append("  C").append(i).append(": ").append(cardToStringCompact(possibleAttackers.get(i))).append("\n");
             }
+            context.append("DEFENDERS:\n");
+            for (int i = 0; i < defenders.size(); i++) {
+                GameEntity d = defenders.get(i);
+                if (d instanceof Player p) {
+                    context.append("  D").append(i).append(": ").append(p.getName()).append(" (").append(p.getLife()).append(" life)\n");
+                } else {
+                    context.append("  D").append(i).append(": ").append(d.toString()).append("\n");
+                }
+            }
+            context.append("\nAssign attackers as pairs: C0-D0,C2-D0 means creature 0 and creature 2 attack defender 0.");
+            context.append("\nOmit creatures you don't want to attack with. Reply NONE for no attacks.");
 
-            List<Integer> chosen = agent.chooseSubset(gameState, options,
-                    "Choose creatures to attack with. Consider combat math: opponent's untapped creatures can block.");
+            String response = agent.chooseRaw(gameState + "\n" + context.toString());
 
-            for (int idx : chosen) {
-                if (idx >= 0 && idx < possibleAttackers.size()) {
-                    combat.addAttacker(possibleAttackers.get(idx), defender);
+            if (response != null && !response.trim().equalsIgnoreCase("NONE")) {
+                for (String pair : response.split(",")) {
+                    pair = pair.trim().toUpperCase();
+                    String[] parts = pair.split("-");
+                    if (parts.length == 2) {
+                        try {
+                            int cIdx = Integer.parseInt(parts[0].replace("C", "").trim());
+                            int dIdx = Integer.parseInt(parts[1].replace("D", "").trim());
+                            if (cIdx >= 0 && cIdx < possibleAttackers.size()
+                                    && dIdx >= 0 && dIdx < defenders.size()) {
+                                combat.addAttacker(possibleAttackers.get(cIdx), defenders.get(dIdx));
+                            }
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }
                 }
             }
         } catch (Exception e) {
@@ -1059,10 +1065,101 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
-        // Targeting is deeply integrated with the TargetChoices system.
-        // Target selection mostly flows through chooseSingleEntityForEffect
-        // which is already LLM-routed.
-        return super.chooseTargetsFor(currentAbility);
+        try {
+            TargetRestrictions tgt = currentAbility.getTargetRestrictions();
+            if (tgt == null) {
+                return super.chooseTargetsFor(currentAbility);
+            }
+
+            // Get all valid targets
+            CardCollectionView validCards = CardUtil.getValidCardsToTarget(
+                    currentAbility);
+
+            // Also check for player targets
+            List<Player> validPlayers = new ArrayList<>();
+            for (Player p : getGame().getPlayers()) {
+                if (currentAbility.canTarget(p)) {
+                    validPlayers.add(p);
+                }
+            }
+
+            // If no valid targets at all, fall back
+            if (validCards.isEmpty() && validPlayers.isEmpty()) {
+                return super.chooseTargetsFor(currentAbility);
+            }
+
+            // Build combined target list
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            List<Object> targetObjects = new ArrayList<>();
+
+            for (Card c : validCards) {
+                String owner = c.getController() == player ? "(yours) " : "(opponent's) ";
+                options.add(owner + cardToString(c));
+                targetObjects.add(c);
+            }
+            for (Player p : validPlayers) {
+                String label = p == player ? "(you) " : "(opponent) ";
+                options.add(label + p.getName() + " (" + p.getLife() + " life)");
+                targetObjects.add(p);
+            }
+
+            if (options.isEmpty()) {
+                return super.chooseTargetsFor(currentAbility);
+            }
+
+            String context = "Choose target for: " + saToString(currentAbility)
+                    + "\nMin targets: " + tgt.getMinTargets(currentAbility.getHostCard(), currentAbility)
+                    + ", Max targets: " + tgt.getMaxTargets(currentAbility.getHostCard(), currentAbility);
+
+            int minTargets = tgt.getMinTargets(currentAbility.getHostCard(), currentAbility);
+            int maxTargets = tgt.getMaxTargets(currentAbility.getHostCard(), currentAbility);
+
+            if (maxTargets == 1) {
+                // Single target — use chooseAction
+                int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+                if (choice >= 0 && choice < targetObjects.size()) {
+                    Object target = targetObjects.get(choice);
+                    if (target instanceof Card c) {
+                        currentAbility.getTargets().add(c);
+                    } else if (target instanceof Player p) {
+                        currentAbility.getTargets().add(p);
+                    }
+                    return true;
+                }
+            } else {
+                // Multiple targets — use chooseSubset
+                List<Integer> chosen = agent.chooseSubset(
+                        gameState + "\nCONTEXT: " + context, options,
+                        "Choose " + minTargets + " to " + maxTargets + " targets.");
+
+                int added = 0;
+                for (int idx : chosen) {
+                    if (idx >= 0 && idx < targetObjects.size() && added < maxTargets) {
+                        Object target = targetObjects.get(idx);
+                        if (target instanceof Card c) {
+                            currentAbility.getTargets().add(c);
+                            added++;
+                        } else if (target instanceof Player p) {
+                            currentAbility.getTargets().add(p);
+                            added++;
+                        }
+                    }
+                }
+
+                if (added >= minTargets) {
+                    return true;
+                }
+            }
+
+            // If we failed to get enough targets, fall back to heuristic
+            currentAbility.getTargets().clear();
+            return super.chooseTargetsFor(currentAbility);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseTargetsFor failed, falling back");
+            currentAbility.getTargets().clear();
+            return super.chooseTargetsFor(currentAbility);
+        }
     }
 
     @Override
@@ -1168,7 +1265,56 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public CardCollectionView orderMoveToZoneList(CardCollectionView cards,
                                                   ZoneType destinationZone, SpellAbility source) {
-        return super.orderMoveToZoneList(cards, destinationZone, source);
+        try {
+            if (cards.size() <= 1) {
+                return super.orderMoveToZoneList(cards, destinationZone, source);
+            }
+
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            for (Card c : cards) {
+                options.add(c.getName());
+            }
+
+            String zoneDesc = destinationZone.toString();
+            String context = "Order these cards being put into " + zoneDesc;
+            if (source != null && source.getHostCard() != null) {
+                context += " (from " + source.getHostCard().getName() + ")";
+            }
+
+            if (destinationZone == ZoneType.Library) {
+                context += "\nFirst in the list = TOP of library (you draw it first)."
+                        + "\nPut the card you want to draw next first.";
+            } else if (destinationZone == ZoneType.Graveyard) {
+                context += "\nFirst in the list = top of graveyard.";
+            }
+
+            List<Integer> ordering = agent.chooseOrdering(gameState + "\nCONTEXT: " + context,
+                    options, "Order these cards (first = top).");
+
+            CardCollection result = new CardCollection();
+            Set<Integer> used = new HashSet<>();
+
+            // Add cards in the order the LLM specified
+            for (int idx : ordering) {
+                if (idx >= 0 && idx < cards.size() && !used.contains(idx)) {
+                    result.add(cards.get(idx));
+                    used.add(idx);
+                }
+            }
+
+            // Add any cards the LLM missed (preserve original order for those)
+            for (int i = 0; i < cards.size(); i++) {
+                if (!used.contains(i)) {
+                    result.add(cards.get(i));
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            Logger.error(e, "External AI orderMoveToZoneList failed, falling back");
+            return super.orderMoveToZoneList(cards, destinationZone, source);
+        }
     }
 
     @Override
@@ -1333,7 +1479,32 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public boolean chooseCardsPile(SpellAbility sa, CardCollectionView pile1,
                                    CardCollectionView pile2, String faceUp) {
-        return super.chooseCardsPile(sa, pile1, pile2, faceUp);
+        try {
+            String gameState = serializeGameState();
+
+            StringBuilder pile1Desc = new StringBuilder("Pile 1: ");
+            for (Card c : pile1) {
+                pile1Desc.append(c.getName()).append(", ");
+            }
+            pile1Desc.append("(").append(pile1.size()).append(" cards)");
+
+            StringBuilder pile2Desc = new StringBuilder("Pile 2: ");
+            for (Card c : pile2) {
+                pile2Desc.append(c.getName()).append(", ");
+            }
+            pile2Desc.append("(").append(pile2.size()).append(" cards)");
+
+            String context = sa.getHostCard().getName()
+                    + "\nChoose which pile to take."
+                    + "\n" + pile1Desc
+                    + "\n" + pile2Desc;
+
+            return agent.chooseYesNo(gameState + "\nCONTEXT: " + context,
+                    "Take Pile 1? (YES = Pile 1, NO = Pile 2)");
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseCardsPile failed, falling back");
+            return super.chooseCardsPile(sa, pile1, pile2, faceUp);
+        }
     }
 
     @Override
@@ -1345,7 +1516,26 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public String chooseKeywordForPump(List<String> options, SpellAbility sa,
                                        String prompt, Card tgtCard) {
-        return super.chooseKeywordForPump(options, sa, prompt, tgtCard);
+        try {
+            if (options.size() <= 1) {
+                return options.isEmpty() ? null : options.get(0);
+            }
+
+            String gameState = serializeGameState();
+            String context = sa.getHostCard().getName()
+                    + " — Choose a keyword to give to " + cardToStringCompact(tgtCard)
+                    + (prompt != null ? "\n" + prompt : "");
+
+            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+
+            if (choice >= 0 && choice < options.size()) {
+                return options.get(choice);
+            }
+            return options.get(0);
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseKeywordForPump failed, falling back");
+            return super.chooseKeywordForPump(options, sa, prompt, tgtCard);
+        }
     }
 
     @Override
@@ -1507,7 +1697,38 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public List<OptionalCostValue> chooseOptionalCosts(SpellAbility chosen,
                                                        List<OptionalCostValue> optionalCostValues) {
-        return super.chooseOptionalCosts(chosen, optionalCostValues);
+        try {
+            if (optionalCostValues.isEmpty()) {
+                return super.chooseOptionalCosts(chosen, optionalCostValues);
+            }
+
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            for (OptionalCostValue ocv : optionalCostValues) {
+                options.add(ocv.getType().toString() + " — " + ocv.getCost().toString());
+            }
+
+            String context = chosen.getHostCard().getName()
+                    + " — Choose which optional costs to pay (e.g. Kicker, Buyback, Entwine)."
+                    + "\nOnly pay if you have the mana AND the effect is worth it."
+                    + "\nAvailable mana: " + buildAvailableMana(player);
+
+            List<Integer> chosenIndices = agent.chooseSubset(
+                    gameState + "\nCONTEXT: " + context, options,
+                    "Choose optional costs to pay, or NONE to skip all.");
+
+            List<OptionalCostValue> result = new ArrayList<>();
+            for (int idx : chosenIndices) {
+                if (idx >= 0 && idx < optionalCostValues.size()) {
+                    result.add(optionalCostValues.get(idx));
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            Logger.error(e, "External AI chooseOptionalCosts failed, falling back");
+            return super.chooseOptionalCosts(chosen, optionalCostValues);
+        }
     }
 
     @Override
@@ -1518,17 +1739,5 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public void resetAtEndOfTurn() {
         super.resetAtEndOfTurn();
-    }
-
-    @Override
-    public void autoPassCancel() {
-    }
-
-    @Override
-    public void awaitNextInput() {
-    }
-
-    @Override
-    public void cancelAwaitNextInput() {
     }
 }
