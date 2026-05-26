@@ -43,6 +43,10 @@ public class ExternalAgentClient {
             - For ATTACK ASSIGNMENT: respond with comma-separated pairs like CN-DN,CN-DN
               where CN is a valid creature index and DN is a valid defender index. Reply NONE
               for no attacks. Only use indices that are listed.
+            - For BLOCK ASSIGNMENT: respond with comma-separated pairs like B0-A0,B1-A0
+              where BN is the blocker index and AN is the attacker index. Multiple
+              blockers can block the same attacker (e.g. B0-A0,B1-A0 = double block).
+              Reply NONE to not block anything. Only use indices that are listed.
 
             Do NOT explain your reasoning. Do NOT add any other text.
 
