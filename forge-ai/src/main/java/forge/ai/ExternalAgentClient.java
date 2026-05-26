@@ -33,17 +33,20 @@ public class ExternalAgentClient {
             1. The current game state (life totals, cards in zones, board state)
             2. A numbered list of legal decisions to take
 
-            RESPONSE FORMAT RULES — follow these exactly:
+            RESPONSE FORMAT RULES - follow these exactly:
             - For ACTION decisions: respond with ONLY the action number. Nothing else.
-            - For SUBSET decisions (e.g. choose attackers): respond with comma-separated
+            - For SUBSET decisions (e.g. choose blockers): respond with comma-separated
               indices, or NONE if you choose nothing. Example: 0,2,3
             - For YES/NO decisions: respond with YES or NO.
             - For ORDERING decisions: respond with comma-separated indices in your
               preferred order.
+            - For ATTACK ASSIGNMENT: respond with comma-separated pairs like CN-DN,CN-DN
+              where CN is a valid creature index and DN is a valid defender index. Reply NONE
+              for no attacks. Only use indices that are listed.
 
             Do NOT explain your reasoning. Do NOT add any other text.
 
-            CRITICAL RULE — NEVER PASS IF YOU CAN DO SOMETHING USEFUL:
+            CRITICAL RULE - NEVER PASS IF YOU CAN DO SOMETHING USEFUL:
             - Action 0 is PASS. Only choose 0 if every other action would actively
               hurt you. If ANY action is even slightly beneficial, DO IT.
             - Playing a creature is almost always better than passing.
@@ -86,7 +89,7 @@ public class ExternalAgentClient {
     // ---------------------------------------------------------------
 
     public String chooseRaw(String prompt) {
-        String response = callLLM(prompt + "\n\nRespond with ONLY the comma-separated attack assignment pairs.");
+        String response = callLLM(prompt);
         gameLog.append("[Raw] ").append(response.trim()).append("\n");
         return response.trim();
     }

@@ -360,8 +360,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     context.append("  D").append(i).append(": ").append(d.toString()).append("\n");
                 }
             }
-            context.append("\nAssign attackers as pairs: C0-D0,C2-D0 means creature 0 and creature 2 attack defender 0.");
-            context.append("\nOmit creatures you don't want to attack with. Reply NONE for no attacks.");
+            context.append("\nDeclare attackers.");
+            context.append("\nRespond with ONLY NONE or the comma-separated attack assignment pairs." +
+                    "Omit creatures you don't want to attack with. ");
 
             String response = agent.chooseRaw(gameState + "\n" + context.toString());
 
