@@ -1,6 +1,5 @@
 package forge.ai;
 
-import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimap;
 
@@ -22,7 +21,6 @@ import forge.game.keyword.KeywordInterface;
 import forge.game.mana.Mana;
 import forge.game.mana.ManaConversionMatrix;
 import forge.game.mana.ManaCostBeingPaid;
-import forge.game.phase.PhaseHandler;
 import forge.game.phase.PhaseType;
 import forge.game.player.*;
 import forge.game.replacement.ReplacementEffect;
