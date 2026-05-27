@@ -12,6 +12,9 @@ import forge.card.mana.ManaCostShard;
 import forge.deck.Deck;
 import forge.deck.DeckSection;
 import forge.game.*;
+import forge.game.ability.AbilityUtils;
+import forge.game.ability.ApiType;
+import forge.game.ability.effects.CharmEffect;
 import forge.game.ability.effects.RollDiceEffect;
 import forge.game.card.*;
 import forge.game.combat.Combat;
@@ -35,7 +38,6 @@ import forge.util.collect.FCollectionView;
 
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
-import org.tinylog.Logger;
 
 import java.util.*;
 import java.util.function.Predicate;
@@ -360,6 +362,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
+                if (!sa.canPlay(true)) continue;
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
                 if (sa.usesTargeting() && !ComputerUtilAbility.isFullyTargetable(sa)) continue;
 
@@ -392,7 +395,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return null;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSpellAbilityToPlay failed, falling back");
             return super.chooseSpellAbilityToPlay();
         }
     }
@@ -461,7 +463,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
             }
         } catch (Exception e) {
-            Logger.error(e, "External AI declareAttackers failed, falling back");
             super.declareAttackers(attacker, combat);
         }
     }
@@ -542,7 +543,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
             }
         } catch (Exception e) {
-            Logger.error(e, "External AI declareBlockers failed, falling back");
             super.declareBlockers(defender, combat);
         }
     }
@@ -588,7 +588,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return optionList.isEmpty() ? null : optionList.getFirst();
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSingleEntityForEffect failed, falling back");
             return super.chooseSingleEntityForEffect(optionList, delayedReveal, sa, title, isOptional, targetedPlayer, params);
         }
     }
@@ -631,7 +630,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsForEffect failed, falling back");
             return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
         }
     }
@@ -671,7 +669,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI choosePermanentsToSacrifice failed, falling back");
             return super.choosePermanentsToSacrifice(sa, min, max, validTargets, message);
         }
     }
@@ -710,7 +707,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsToDiscardFrom failed, falling back");
             return super.chooseCardsToDiscardFrom(playerDiscard, sa, validCards, min, max, visibleToChooser);
         }
     }
@@ -727,7 +723,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
-            Logger.error(e, "External AI confirmAction failed, falling back");
             return super.confirmAction(sa, mode, message, options, cardToShow, params);
         }
     }
@@ -744,7 +739,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     wrapper.getHostCard().getOracleText() + ")";
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
-            Logger.error(e, "External AI confirmTrigger failed, falling back");
             return super.confirmTrigger(wrapper);
         }
     }
@@ -758,7 +752,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return agent.chooseYesNo(gameState + "\n" + handDesc,
                     "Keep this hand? (YES = keep, NO = mulligan)");
         } catch (Exception e) {
-            Logger.error(e, "External AI mulliganKeepHand failed, falling back");
             return super.mulliganKeepHand(firstPlayer, cardsToReturn);
         }
     }
@@ -788,7 +781,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return ImmutablePair.of(toTop, toBottom);
         } catch (Exception e) {
-            Logger.error(e, "External AI arrangeForScry failed, falling back");
             return super.arrangeForScry(topN);
         }
     }
@@ -818,7 +810,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return ImmutablePair.of(toTop, toGraveyard);
         } catch (Exception e) {
-            Logger.error(e, "External AI arrangeForSurveil failed, falling back");
             return super.arrangeForSurveil(topN);
         }
     }
@@ -871,7 +862,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseModeForAbility failed, falling back");
             return super.chooseModeForAbility(sa, possible, min, num, allowRepeat);
         }
     }
@@ -893,7 +883,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return agent.chooseYesNo(gameState, fullQuestion);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseBinary failed, falling back");
             return super.chooseBinary(sa, question, kindOfChoice, defaultChoice);
         }
     }
@@ -942,7 +931,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsToDiscardToMaximumHandSize failed, falling back");
             return super.chooseCardsToDiscardToMaximumHandSize(numDiscard);
         }
     }
@@ -982,7 +970,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return spells.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSingleSpellForEffect failed, falling back");
             return super.chooseSingleSpellForEffect(spells, sa, title, params);
         }
     }
@@ -1020,7 +1007,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return colorBytes.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseColor failed, falling back");
             return super.chooseColor(message, sa, colors);
         }
     }
@@ -1051,7 +1037,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return colorBytes.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseColorAllowColorless failed, falling back");
             return super.chooseColorAllowColorless(message, c, colors);
         }
     }
@@ -1104,7 +1089,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return ColorSet.fromMask(result);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseColors failed, falling back");
             return super.chooseColors(message, sa, min, max, options);
         }
     }
@@ -1145,7 +1129,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return abilities.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI getAbilityToPlay failed, falling back");
             return super.getAbilityToPlay(hostCard, abilities, triggerEvent);
         }
     }
@@ -1160,7 +1143,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             // If the spell needs targets, set them up via LLM before playing
             if (sa.usesTargeting() && (sa.getTargets() == null || sa.getTargets().isEmpty())) {
                 if (!chooseTargetsFor(sa)) {
-                    Logger.info("playChosenSpellAbility: targeting failed for {}", sa.getHostCard().getName());
                     return false;
                 }
             }
@@ -1243,7 +1225,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return min;
         } catch (Exception e) {
-            Logger.error(e, "External AI announceRequirements failed, falling back");
             return super.announceRequirements(ability, min, max, announce);
         }
     }
@@ -1289,7 +1270,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI choosePermanentsToDestroy failed, falling back");
             return super.choosePermanentsToDestroy(sa, min, max, validTargets, message);
         }
     }
@@ -1301,11 +1281,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
-        Logger.info("chooseTargetsFor called for: {}", currentAbility.getHostCard().getName());
         try {
             TargetRestrictions tgt = currentAbility.getTargetRestrictions();
             if (tgt == null) {
-                Logger.info("No target restriction found. Reverting to heuristic.");
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1323,7 +1301,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             // If no valid targets at all, fall back
             if (validCards.isEmpty() && validPlayers.isEmpty()) {
-                Logger.info("No valid targets found. Fallback to heuristic.");
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1343,7 +1320,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             if (options.isEmpty()) {
-                Logger.info("No target options found. Falling back to heuristic.");
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1393,10 +1369,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             // If we failed to get enough targets, fall back to heuristic
             currentAbility.getTargets().clear();
-            Logger.info("Didn't find enough targets. Falling back to heuristic.");
             return super.chooseTargetsFor(currentAbility);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseTargetsFor failed, falling back");
             currentAbility.getTargets().clear();
             return super.chooseTargetsFor(currentAbility);
         }
@@ -1435,7 +1409,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return allTargets.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseTarget failed, falling back");
             return super.chooseTarget(sa, allTargets);
         }
     }
@@ -1501,7 +1474,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsForEffectMultiple failed, falling back");
             return super.chooseCardsForEffectMultiple(validMap, sa, title, isOptional);
         }
     }
@@ -1560,7 +1532,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseEntitiesForEffect failed, falling back");
             return super.chooseEntitiesForEffect(optionList, min, max, delayedReveal, sa, title, targetedPlayer, params);
         }
     }
@@ -1614,7 +1585,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSpellAbilitiesForEffect failed, falling back");
             return super.chooseSpellAbilitiesForEffect(spells, sa, title, num, params);
         }
     }
@@ -1639,7 +1609,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return agent.chooseYesNo(gameState, fullQuestion);
         } catch (Exception e) {
-            Logger.error(e, "External AI confirmReplacementEffect failed, falling back");
             return super.confirmReplacementEffect(replacementEffect, effectSA, affected, question);
         }
     }
@@ -1663,7 +1632,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
-            Logger.error(e, "External AI confirmPayment failed, falling back");
             return super.confirmPayment(costPart, prompt, sa);
         }
     }
@@ -1714,7 +1682,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI orderBlockers failed, falling back");
             return super.orderBlockers(attacker, blockers);
         }
     }
@@ -1759,7 +1726,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI orderBlocker failed, falling back");
             return super.orderBlocker(attacker, blocker, oldBlockers);
         }
     }
@@ -1800,7 +1766,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI orderAttackers failed, falling back");
             return super.orderAttackers(blocker, attackers);
         }
     }
@@ -1825,7 +1790,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nYES = draw it next turn, NO = leave it where it is (usually bottom/graveyard).";
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
-            Logger.error(e, "External AI willPutCardOnTop failed, falling back");
             return super.willPutCardOnTop(c);
         }
     }
@@ -1879,7 +1843,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI orderMoveToZoneList failed, falling back");
             return super.orderMoveToZoneList(cards, destinationZone, source);
         }
     }
@@ -1956,7 +1919,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 return result;
             }
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsToDiscardUnlessType failed, falling back");
             return super.chooseCardsToDiscardUnlessType(num, hand, uTypes, sa);
         }
     }
@@ -1992,7 +1954,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsToDelve failed, falling back");
             return super.chooseCardsToDelve(genericAmount, grave);
         }
     }
@@ -2011,6 +1972,20 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public void playSpellAbilityNoStack(SpellAbility effectSA, boolean canSetupTargets) {
+        if (effectSA.usesTargeting()) {
+            effectSA.resetTargets();
+            chooseTargetsFor(effectSA);
+        }
+
+        SpellAbility sub = effectSA.getSubAbility();
+        while (sub != null) {
+            if (sub.usesTargeting()) {
+                sub.resetTargets();
+                chooseTargetsFor(sub);
+            }
+            sub = sub.getSubAbility();
+        }
+
         super.playSpellAbilityNoStack(effectSA, canSetupTargets);
     }
 
@@ -2055,7 +2030,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI orderSimultaneousSa failed, falling back");
             return super.orderSimultaneousSa(activePlayerSAs);
         }
     }
@@ -2067,7 +2041,65 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean playTrigger(Card host, WrappedAbility wrapperAbility, boolean isMandatory) {
-        return super.playTrigger(host, wrapperAbility, isMandatory);
+
+        SpellAbility sa = wrapperAbility.getWrappedAbility();
+
+        // Handle Charm
+        if (sa.getApi() == ApiType.Charm) {
+            if (!CharmEffect.makeChoices(sa)) {
+                return false;
+            }
+            if (!sa.hasParam("Random")) {
+                return ComputerUtil.playNoStack(wrapperAbility.getActivatingPlayer(), wrapperAbility, getGame(), true);
+            }
+            sa = sa.getSubAbility();
+        }
+
+        // Handle TargetingPlayer
+        if (sa.hasParam("TargetingPlayer")) {
+            Player targetingPlayer = AbilityUtils.getDefinedPlayers(host, sa.getParam("TargetingPlayer"), sa).get(0);
+            sa.setTargetingPlayer(targetingPlayer);
+            targetingPlayer.getController().chooseTargetsFor(sa);
+            return ComputerUtil.playNoStack(wrapperAbility.getActivatingPlayer(), wrapperAbility, getGame(), true);
+        }
+
+        // For optional triggers, ask LLM first whether to use it at all
+        if (!isMandatory) {
+            try {
+                String gameState = serializeGameState();
+                String question = "Use triggered ability from " + host.getName()
+                        + "?\nAbility: " + sa.getDescription()
+                        + "\nCard: " + host.getOracleText();
+                if (!agent.chooseYesNo(gameState, question)) {
+                    return false;  // LLM says no, skip this trigger
+                }
+            } catch (Exception e) {
+                return super.playTrigger(host, wrapperAbility, isMandatory);
+            }
+        }
+
+        // Now set up targets via LLM (chooseTargetsFor routes to your LLM override)
+        if (sa.usesTargeting()) {
+            if (!chooseTargetsFor(sa)) {
+                if (isMandatory) {
+                    // LLM couldn't find targets, fall back to heuristic
+                    return super.playTrigger(host, wrapperAbility, true);
+                }
+                return false;
+            }
+        }
+
+        // Handle sub-abilities that need targets
+        SpellAbility sub = sa.getSubAbility();
+        while (sub != null) {
+            if (sub.usesTargeting()) {
+                chooseTargetsFor(sub);
+            }
+            sub = sub.getSubAbility();
+        }
+
+        // Play the trigger
+        return ComputerUtil.playNoStack(wrapperAbility.getActivatingPlayer(), wrapperAbility, getGame(), true);
     }
 
     @Override
@@ -2166,7 +2198,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return options.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI vote failed, falling back");
             return super.vote(sa, prompt, options, votes, forPlayer, optional);
         }
     }
@@ -2213,7 +2244,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI tuckCardsViaMulligan failed, falling back");
             return super.tuckCardsViaMulligan(hand, cardsToReturn);
         }
     }
@@ -2276,7 +2306,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return faces.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSingleCardFace failed, falling back");
             return super.chooseSingleCardFace(sa, faces, message);
         }
     }
@@ -2307,7 +2336,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return states.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSingleCardState failed, falling back");
             return super.chooseSingleCardState(sa, states, message, params);
         }
     }
@@ -2338,7 +2366,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return agent.chooseYesNo(gameState + "\nCONTEXT: " + context,
                     "Take Pile 1? (YES = Pile 1, NO = Pile 2)");
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsPile failed, falling back");
             return super.chooseCardsPile(sa, pile1, pile2, faceUp);
         }
     }
@@ -2369,7 +2396,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return options.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCounterType failed, falling back");
             return super.chooseCounterType(options, sa, prompt, params);
         }
     }
@@ -2395,7 +2421,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return options.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseKeywordForPump failed, falling back");
             return super.chooseKeywordForPump(options, sa, prompt, tgtCard);
         }
     }
@@ -2430,7 +2455,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return choices.get(0);
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseProtectionType failed, falling back");
             return super.chooseProtectionType(sa, choices);
         }
     }
@@ -2504,7 +2528,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsForCost failed, falling back");
             return super.chooseCardsForCost(optionList, sa, cpl, amount, isOptional, prompt);
         }
     }
@@ -2573,7 +2596,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return fetchList.getFirst();
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSingleCardForZoneChange failed, falling back");
             return super.chooseSingleCardForZoneChange(destination, origin, sa, fetchList,
                     delayedReveal, selectPrompt, isOptional, decider);
         }
@@ -2629,7 +2651,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsForZoneChange failed, falling back");
             return super.chooseCardsForZoneChange(destination, origin, sa, fetchList, min, max,
                     delayedReveal, selectPrompt, decider);
         }
@@ -2683,7 +2704,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseCardsToRevealFromHand failed, falling back");
             return super.chooseCardsToRevealFromHand(min, max, valid);
         }
     }
@@ -2722,7 +2742,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseSaToActivateFromOpeningHand failed, falling back");
             return super.chooseSaToActivateFromOpeningHand(usableFromOpeningHand);
         }
     }
@@ -2784,7 +2803,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
-            Logger.error(e, "External AI chooseOptionalCosts failed, falling back");
             return super.chooseOptionalCosts(chosen, optionalCostValues);
         }
     }
