@@ -182,6 +182,18 @@ public class ExternalAgentClient {
     // ---------------------------------------------------------------
 
     private String callLLM(String userMessage) {
+        // Manual mode: route to command line instead of LLM
+        if (Boolean.getBoolean("forge.external.agent.manual")) {
+            Logger.info("human-player");
+            Logger.info("=== LLM REQUEST ===\n{}", userMessage);
+            System.out.println("\n" + userMessage);
+            System.out.print("YOUR CHOICE> ");
+            String input = new java.util.Scanner(System.in).nextLine().trim();
+            Logger.info("=== LLM RESPONSE ===\n{}\n====================", input);
+            gameLog.append("[Manual] ").append(input).append("\n");
+            return input;
+        }
+
         String systemContent = SYSTEM_PROMPT + "\n\nGAME LOG SO FAR:\n" + gameLog.toString();
 
         String json = "{" +
