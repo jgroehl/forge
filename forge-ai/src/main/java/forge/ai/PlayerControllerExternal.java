@@ -289,7 +289,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
-                if (!brains.canPlaySa(sa).willingToPlay()) continue;
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
 
                 actions.add(saToString(sa));
@@ -2286,7 +2285,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String gameState = serializeGameState();
             String context = sa.getHostCard().getName()
-                    + " — Choose a keyword to give to " + cardToStringCompact(tgtCard)
+                    + " — Choose a keyword to give to " + cardToStringCompact(tgtCard) +
+                    " (has: " + tgtCard.getKeywords() + ")"
                     + (prompt != null ? "\n" + prompt : "");
 
             int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
