@@ -58,6 +58,7 @@ public class ExternalAgentClient {
         - Identify whether you are advantaged in the long game or need to race.
         - Use removal and interaction on the most strategically important threats.
         - Prioritize lethal attacks and forced winning lines when available.
+        - Play a land on each of your turns.
         - Treat the listed heuristics as guidelines, not absolute rules.
         """;
 

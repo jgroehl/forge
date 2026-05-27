@@ -39,6 +39,8 @@ import org.tinylog.Logger;
 
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * PlayerController that routes strategic decisions to an external LLM agent
@@ -47,13 +49,11 @@ import java.util.function.Predicate;
  */
 public class PlayerControllerExternal extends PlayerControllerAi {
 
-    private final AiController brains;
     private final ExternalAgentClient agent;
 
     public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
                                     String agentUrl, String modelName) {
         super(game, p, lp);
-        this.brains = getAi();
         this.agent = new ExternalAgentClient(agentUrl, modelName);
     }
 
@@ -87,6 +87,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         PhaseType ph = getGame().getPhaseHandler().getPhase();
         sb.append("turn=").append(getGame().getPhaseHandler().getTurn());
         sb.append(" phase=").append(ph != null ? ph.toString() : "PREGAME");
+        sb.append(" player=").append(playerTag(getGame().getPhaseHandler().getPlayerTurn()));
         sb.append("\n");
 
         int oppCount = 0;
@@ -165,42 +166,112 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
 
         if (!getGame().getStack().isEmpty()) {
-            sb.append("stack: ");
+            sb.append("STACK: ");
             for (SpellAbilityStackInstance si : getGame().getStack()) {
-                sb.append(si.getSpellAbility().getHostCard().getName()).append(", ");
+                sb.append(si.getSpellAbility().getHostCard().getName()).append(": ")
+                        .append(si.getStackDescription()).append("\n");
             }
-            sb.append("\n");
+        }
+
+        if (ph != null) {
+            if ((ph != PhaseType.MAIN1) && (ph != PhaseType.MAIN2)) {
+                sb.append("PRIORITY NOTE: You have priority at instant speed. ")
+                    .append("Passing is normal here unless you have a beneficial ")
+                    .append("instant-speed play (e.g. combat trick, removal, counterspell, ")
+                    .append("or activated ability).\n");
+        }
         }
 
         return sb.toString();
     }
 
+    private static final List<Character> MANA_ORDER =
+            Arrays.asList('W', 'U', 'B', 'R', 'G', 'C');
+
     private String buildAvailableMana(Player p) {
-        int W = 0, U = 0, B = 0, R = 0, G = 0, C = 0;
+        List<String> fixed = new ArrayList<>();
+        List<String> flexible = new ArrayList<>();
+
+        int total = 0;
+
         for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
-            if (c.isLand() && !c.isTapped()) {
-                for (SpellAbility sa : c.getManaAbilities()) {
-                    if (sa.getManaPart() == null) continue;
-                    String produced = sa.getManaPart().getOrigProduced();
-                    if (produced.contains("W")) W++;
-                    else if (produced.contains("R")) R++;
-                    else if (produced.contains("G")) G++;
-                    else if (produced.contains("U")) U++;
-                    else if (produced.contains("B")) B++;
-                    else C++;
-                    break;
+            // Include ALL untapped mana sources, not just lands
+            if (c.isTapped()) {
+                continue;
+            }
+            List<SpellAbility> manaAbilities = new ArrayList<>(c.getManaAbilities());
+            if (manaAbilities.isEmpty()) {
+                continue;
+            }
+            // Collect all unique mana colors this permanent can produce
+            Set<Character> colors = new LinkedHashSet<>();
+
+
+            for (SpellAbility sa : manaAbilities) {
+                if (sa.getManaPart() == null) {
+                    continue;
+                }
+
+                String produced = sa.getManaPart().getOrigProduced();
+                if (produced == null) {
+                    continue;
+                }
+
+                boolean producesColored = false;
+
+                Matcher matcher = Pattern.compile("[WUBRG]").matcher(produced);
+
+                while (matcher.find()) {
+                    colors.add(matcher.group().charAt(0));
+                    producesColored = true;
+                }
+
+                // Only include colorless if it's truly colorless-only
+                if (!producesColored && produced.contains("C")) {
+                    colors.add('C');
                 }
             }
+            if (colors.isEmpty()) {
+                continue;
+            }
+
+            // Normalize mana ordering to WUBRGC
+            List<Character> ordered = new ArrayList<>(colors);
+            ordered.sort(Comparator.comparingInt(MANA_ORDER::indexOf));
+
+            if (ordered.size() == 1) {
+                fixed.add(String.valueOf(ordered.get(0)));
+            } else {
+                StringBuilder flex = new StringBuilder("{");
+
+                for (int i = 0; i < ordered.size(); i++) {
+                    if (i > 0) {
+                        flex.append("/");
+                    }
+                    flex.append(ordered.get(i));
+                }
+                flex.append("}");
+                flexible.add(flex.toString());
+            }
+            total++;
         }
+
+        // Sort fixed mana in WUBRGC order
+        fixed.sort(Comparator.comparingInt(s ->
+                MANA_ORDER.indexOf(s.charAt(0))));
+        Collections.sort(flexible);
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < W; i++) sb.append("W");
-        for (int i = 0; i < U; i++) sb.append("U");
-        for (int i = 0; i < B; i++) sb.append("B");
-        for (int i = 0; i < R; i++) sb.append("R");
-        for (int i = 0; i < G; i++) sb.append("G");
-        for (int i = 0; i < C; i++) sb.append("C");
-        int total = W + U + B + R + G + C;
-        if (total == 0) return "";
+
+        for (String s : fixed) {
+            sb.append(s);
+        }
+        for (String s : flexible) {
+            sb.append(s);
+        }
+        if (total == 0) {
+            return "0 (0 total)";
+        }
+
         return sb.toString() + " (" + total + " total)";
     }
 
@@ -209,8 +280,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         if (c.isCreature()) {
             sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness()).append(" ");
         }
-        if (c.isTapped()) sb.append("(tapped)");
-        if (c.isSick()) sb.append("(sick)");
+        if (c.isTapped()) sb.append(" (tapped)");
+        if (c.isSick()) sb.append(" (summoning sick)");
         Map<CounterType, Integer> counters = c.getCounters();
         if (!counters.isEmpty()) {
             sb.append("[");
@@ -290,6 +361,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
+                if (sa.usesTargeting() && !ComputerUtilAbility.isFullyTargetable(sa)) continue;
 
                 actions.add(saToString(sa));
                 actionSources.add(sa);
@@ -1080,7 +1152,29 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean playChosenSpellAbility(SpellAbility sa) {
-        return super.playChosenSpellAbility(sa);
+        if (sa.isLandAbility()) {
+            if (sa.canPlay()) {
+                sa.resolve();
+            }
+        } else {
+            // If the spell needs targets, set them up via LLM before playing
+            if (sa.usesTargeting() && (sa.getTargets() == null || sa.getTargets().isEmpty())) {
+                if (!chooseTargetsFor(sa)) {
+                    Logger.info("playChosenSpellAbility: targeting failed for {}", sa.getHostCard().getName());
+                    return false;
+                }
+            }
+            // Also handle sub-abilities that need targets
+            SpellAbility sub = sa.getSubAbility();
+            while (sub != null) {
+                if (sub.usesTargeting() && (sub.getTargets() == null || sub.getTargets().isEmpty())) {
+                    chooseTargetsFor(sub);
+                }
+                sub = sub.getSubAbility();
+            }
+            ComputerUtil.handlePlayingSpellAbility(player, sa, null);
+        }
+        return true;
     }
 
     @Override
@@ -1207,9 +1301,11 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
+        Logger.info("chooseTargetsFor called for: {}", currentAbility.getHostCard().getName());
         try {
             TargetRestrictions tgt = currentAbility.getTargetRestrictions();
             if (tgt == null) {
+                Logger.info("No target restriction found. Reverting to heuristic.");
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1227,6 +1323,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             // If no valid targets at all, fall back
             if (validCards.isEmpty() && validPlayers.isEmpty()) {
+                Logger.info("No valid targets found. Fallback to heuristic.");
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1246,6 +1343,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             if (options.isEmpty()) {
+                Logger.info("No target options found. Falling back to heuristic.");
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1295,6 +1393,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             // If we failed to get enough targets, fall back to heuristic
             currentAbility.getTargets().clear();
+            Logger.info("Didn't find enough targets. Falling back to heuristic.");
             return super.chooseTargetsFor(currentAbility);
         } catch (Exception e) {
             Logger.error(e, "External AI chooseTargetsFor failed, falling back");
@@ -1926,7 +2025,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             List<String> options = new ArrayList<>();
             for (SpellAbility sa : activePlayerSAs) {
                 String desc = sa.getHostCard().getName();
-                String saDesc = sa.getDescription();
+                String saDesc = sa.getStackDescription();
                 if (saDesc != null && !saDesc.isEmpty()) {
                     desc += ": " + saDesc;
                 }
