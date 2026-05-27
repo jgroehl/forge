@@ -72,6 +72,17 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return buildManualGameState();
     }
 
+    private String playerTag(Player p) {
+        if (p == player) return "you";
+        int oppIdx = 0;
+        for (Player gp : getGame().getPlayers()) {
+            if (gp == player) continue;
+            oppIdx++;
+            if (gp == p) break;
+        }
+        return getGame().getPlayers().size() > 2 ? "opp" + oppIdx : "opp";
+    }
+
     private String buildManualGameState() {
         StringBuilder sb = new StringBuilder();
 
@@ -82,13 +93,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
         int oppCount = 0;
         for (Player p : getGame().getPlayers()) {
-            String tag;
-            if (p == player) {
-                tag = "you";
-            } else {
-                oppCount++;
-                tag = getGame().getPlayers().size() > 2 ? "opp" + oppCount : "opp";
-            }
+            String tag = playerTag(p);
             boolean isMe = p == player;
 
             sb.append(tag).append(": ").append(p.getLife()).append(" life");
@@ -142,7 +147,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             sb.append("COMBAT:\n");
             for (Card attacker : combat.getAttackers()) {
                 sb.append("  attacking: ").append(cardToStringCompact(attacker));
-                sb.append(" -> ").append(combat.getDefenderByAttacker(attacker));
+                GameEntity def = combat.getDefenderByAttacker(attacker);
+                sb.append(" -> ").append(def instanceof Player p ? playerTag(p) : def.toString());
 
                 CardCollection blockers = combat.getBlockers(attacker);
                 if (blockers != null && !blockers.isEmpty()) {
@@ -337,7 +343,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             CardCollection possibleAttackers = new CardCollection();
             for (Card c : player.getCreaturesInPlay()) {
-                if (c.isCreature() && !c.isSick() && !c.isTapped()) {
+                if (CombatUtil.canAttack(c)) {
                     possibleAttackers.add(c);
                 }
             }
@@ -355,7 +361,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             for (int i = 0; i < defenders.size(); i++) {
                 GameEntity d = defenders.get(i);
                 if (d instanceof Player p) {
-                    context.append("  D").append(i).append(": ").append(p.getName()).append(" (").append(p.getLife()).append(" life)\n");
+                    String tag = playerTag(p);
+                    context.append("  D").append(i).append(": ").append(tag)
+                            .append(" (").append(p.getLife()).append(" life)\n");
                 } else {
                     context.append("  D").append(i).append(": ").append(d.toString()).append("\n");
                 }
@@ -427,9 +435,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             StringBuilder context = new StringBuilder();
             context.append("ATTACKERS:\n");
             for (int i = 0; i < attackers.size(); i++) {
-                context.append("  A").append(i).append(": ").append(cardToStringCompact(attackers.get(i)))
-                        .append(" (controlled by ").append(attackers.get(i).getController().getName()).append(")\n");
+                Card atk = attackers.get(i);
+                String controllerTag = playerTag(atk.getController());
+                context.append("  A").append(i).append(": ").append(cardToStringCompact(atk))
+                        .append(" (controlled by ").append(controllerTag).append(")\n");
             }
+
             context.append("YOUR BLOCKERS:\n");
             for (int i = 0; i < relevantBlockers.size(); i++) {
                 context.append("  B").append(i).append(": ").append(cardToStringCompact(relevantBlockers.get(i))).append("\n");
@@ -886,7 +897,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 if (spell.getDescription() != null && !spell.getDescription().isEmpty()) {
                     desc += ": " + spell.getDescription();
                 }
-                desc += " (controlled by " + host.getController().getName() + ")";
+                desc += " (controlled by " + playerTag(host.getController()) + ")";
                 options.add(desc);
             }
 
@@ -1233,8 +1244,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 targetObjects.add(c);
             }
             for (Player p : validPlayers) {
-                String label = p == player ? "(you) " : "(opponent) ";
-                options.add(label + p.getName() + " (" + p.getLife() + " life)");
+                options.add(playerTag(p) + " (" + p.getLife() + " life)");
                 targetObjects.add(p);
             }
 
@@ -1310,7 +1320,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 SpellAbilityStackInstance si = pair.getLeft();
                 GameObject target = pair.getRight();
                 String desc = si.getSpellAbility().getHostCard().getName()
-                        + " (cast by " + si.getSpellAbility().getHostCard().getController().getName() + ")";
+                        + " (cast by " + playerTag(si.getSpellAbility().getHostCard().getController()) + ")";
                 if (target != null) {
                     desc += " targeting " + target.toString();
                 }
@@ -1476,7 +1486,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 if (spellDesc != null && !spellDesc.isEmpty()) {
                     desc += ": " + spellDesc;
                 }
-                desc += " (controlled by " + host.getController().getName() + ")";
+                desc += " (controlled by " + playerTag(host.getController()) + ")";
                 options.add(desc);
             }
 
