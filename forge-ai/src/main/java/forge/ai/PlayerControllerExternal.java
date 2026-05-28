@@ -1,5 +1,6 @@
 package forge.ai;
 
+import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimap;
 
@@ -440,6 +441,23 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return list;
     }
 
+    private void removeUnpayableAttackers(Combat combat) {
+        for (Card attacker : combat.getAttackers().threadSafeIterable()) {
+            Cost attackCost = CombatUtil.getAttackCost(
+                    getGame(), attacker, combat.getDefenderByAttacker(attacker));
+            if (attackCost == null) {
+                continue;
+            }
+            SpellAbility fakeSA = new SpellAbility.EmptySa(attacker, attacker.getController());
+            fakeSA.setCardState(attacker.getCurrentState());
+            fakeSA.setPayCosts(attackCost);
+            fakeSA.setSVar("X", "0");
+            if (!ComputerUtilCost.canPayCost(attackCost, fakeSA, player, true)) {
+                combat.removeFromCombat(attacker);
+            }
+        }
+    }
+
     @Override
     public void declareAttackers(Player attacker, Combat combat) {
         try {
@@ -496,7 +514,24 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     }
                 }
             }
+
+            removeUnpayableAttackers(combat);
+
+            if (!CombatUtil.validateAttackers(combat)) {
+                combat.clearAttackers();
+                final Map<Card, GameEntity> legal =
+                        combat.getAttackConstraints().getLegalAttackers().getLeft();
+                for (Map.Entry<Card, GameEntity> e : legal.entrySet()) {
+                    combat.addAttacker(e.getKey(), e.getValue());
+                }
+                // Last resort: full heuristic redeclaration
+                if (!CombatUtil.validateAttackers(combat)) {
+                    combat.clearAttackers();
+                    super.declareAttackers(attacker, combat);
+                }
+            }
         } catch (Exception e) {
+            combat.clearAttackers();
             super.declareAttackers(attacker, combat);
         }
     }
@@ -1074,17 +1109,24 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     // ---------------------------------------------------------------
     // CHOOSE COLOR / CHOOSE COLORS
     // ---------------------------------------------------------------
+// ---------------- chooseColor ----------------
     @Override
     public byte chooseColor(String message, SpellAbility sa, ColorSet colors) {
         try {
+            // SHORT-CIRCUIT: forced choice — no real decision to make.
+            // Mirrors the heuristic PlayerControllerAi.chooseColor.
+            if (colors.countColors() < 2) {
+                return Iterables.getFirst(colors, MagicColor.Color.WHITE).getColorMask();
+            }
+
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             List<Byte> colorBytes = new ArrayList<>();
 
             if (colors.hasWhite()) { options.add("White"); colorBytes.add(MagicColor.WHITE); }
-            if (colors.hasBlue()) { options.add("Blue"); colorBytes.add(MagicColor.BLUE); }
+            if (colors.hasBlue())  { options.add("Blue");  colorBytes.add(MagicColor.BLUE); }
             if (colors.hasBlack()) { options.add("Black"); colorBytes.add(MagicColor.BLACK); }
-            if (colors.hasRed()) { options.add("Red"); colorBytes.add(MagicColor.RED); }
+            if (colors.hasRed())   { options.add("Red");   colorBytes.add(MagicColor.RED); }
             if (colors.hasGreen()) { options.add("Green"); colorBytes.add(MagicColor.GREEN); }
 
             if (options.isEmpty()) {
@@ -1108,17 +1150,27 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
     }
 
+
+    // ---------------- chooseColorAllowColorless ----------------
     @Override
     public byte chooseColorAllowColorless(String message, Card c, ColorSet colors) {
         try {
+            // SHORT-CIRCUIT: with no allowed colors, colorless is the only option.
+            // NOTE: do NOT short-circuit on countColors() == 1 here — colorless is
+            // always offered as a distinct choice in this method, so 1 color + colorless
+            // = 2 real options the LLM may still want to choose between.
+            if (colors.countColors() == 0) {
+                return MagicColor.COLORLESS;
+            }
+
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             List<Byte> colorBytes = new ArrayList<>();
 
             if (colors.hasWhite()) { options.add("White"); colorBytes.add(MagicColor.WHITE); }
-            if (colors.hasBlue()) { options.add("Blue"); colorBytes.add(MagicColor.BLUE); }
+            if (colors.hasBlue())  { options.add("Blue");  colorBytes.add(MagicColor.BLUE); }
             if (colors.hasBlack()) { options.add("Black"); colorBytes.add(MagicColor.BLACK); }
-            if (colors.hasRed()) { options.add("Red"); colorBytes.add(MagicColor.RED); }
+            if (colors.hasRed())   { options.add("Red");   colorBytes.add(MagicColor.RED); }
             if (colors.hasGreen()) { options.add("Green"); colorBytes.add(MagicColor.GREEN); }
             options.add("Colorless"); colorBytes.add(MagicColor.COLORLESS);
 
@@ -1138,17 +1190,25 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
     }
 
+
+    // ---------------- chooseColors ----------------
     @Override
     public ColorSet chooseColors(String message, SpellAbility sa, int min, int max, ColorSet options) {
         try {
+            // SHORT-CIRCUIT: if the number of available colors is ≤ the required
+            // minimum, the player must take all of them. No real choice exists.
+            if (options.countColors() <= min) {
+                return options;
+            }
+
             String gameState = serializeGameState();
             List<String> colorOptions = new ArrayList<>();
             List<Byte> colorBytes = new ArrayList<>();
 
             if (options.hasWhite()) { colorOptions.add("White"); colorBytes.add(MagicColor.WHITE); }
-            if (options.hasBlue()) { colorOptions.add("Blue"); colorBytes.add(MagicColor.BLUE); }
+            if (options.hasBlue())  { colorOptions.add("Blue");  colorBytes.add(MagicColor.BLUE); }
             if (options.hasBlack()) { colorOptions.add("Black"); colorBytes.add(MagicColor.BLACK); }
-            if (options.hasRed()) { colorOptions.add("Red"); colorBytes.add(MagicColor.RED); }
+            if (options.hasRed())   { colorOptions.add("Red");   colorBytes.add(MagicColor.RED); }
             if (options.hasGreen()) { colorOptions.add("Green"); colorBytes.add(MagicColor.GREEN); }
 
             if (colorOptions.isEmpty()) {
@@ -1384,9 +1444,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 return super.chooseTargetsFor(currentAbility);
             }
 
+            // IMPORTANT: clearTargets() (not resetTargets() / getTargets().clear())
+            // is what re-initializes dividedValue for DividedAsYouChoose abilities.
+            // See SpellAbility.clearTargets() in the engine.
+            currentAbility.clearTargets();
+
             // Get all valid targets
-            CardCollectionView validCards = CardUtil.getValidCardsToTarget(
-                    currentAbility);
+            CardCollectionView validCards = CardUtil.getValidCardsToTarget(currentAbility);
 
             // Also check for player targets
             List<Player> validPlayers = new ArrayList<>();
@@ -1404,7 +1468,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             // Build combined target list
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
-            List<Object> targetObjects = new ArrayList<>();
+            List<GameObject> targetObjects = new ArrayList<>();
 
             for (Card c : validCards) {
                 String owner = c.getController() == player ? "(yours) " : "(opponent's) ";
@@ -1420,57 +1484,182 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 return super.chooseTargetsFor(currentAbility);
             }
 
-            String context = "Choose target for: " + saToString(currentAbility)
-                    + "\nMin targets: " + tgt.getMinTargets(currentAbility.getHostCard(), currentAbility)
-                    + ", Max targets: " + tgt.getMaxTargets(currentAbility.getHostCard(), currentAbility);
-
             int minTargets = tgt.getMinTargets(currentAbility.getHostCard(), currentAbility);
             int maxTargets = tgt.getMaxTargets(currentAbility.getHostCard(), currentAbility);
 
+            boolean divided = currentAbility.isDividedAsYouChoose();
+            int totalToDivide = divided ? currentAbility.getStillToDivide() : 0;
+
+            StringBuilder ctxSb = new StringBuilder();
+            ctxSb.append("Choose target for: ").append(saToString(currentAbility));
+            ctxSb.append("\nMin targets: ").append(minTargets)
+                    .append(", Max targets: ").append(maxTargets);
+            if (divided) {
+                ctxSb.append("\nDIVIDED AS YOU CHOOSE: distribute exactly ")
+                        .append(totalToDivide)
+                        .append(" among your chosen targets (each target gets at least 1).");
+            }
+            String context = ctxSb.toString();
+
+            // ----- pick the targets (no allocation yet) -----
+            List<GameObject> chosenTargets = new ArrayList<>();
+
             if (maxTargets == 1) {
-                // Single target - use chooseAction
+                // Single target
                 int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
                 if (choice >= 0 && choice < targetObjects.size()) {
-                    Object target = targetObjects.get(choice);
-                    if (target instanceof Card c) {
-                        currentAbility.getTargets().add(c);
-                    } else if (target instanceof Player p) {
-                        currentAbility.getTargets().add(p);
-                    }
-                    return true;
+                    chosenTargets.add(targetObjects.get(choice));
                 }
             } else {
-                // Multiple targets - use chooseSubset
+                // Multiple targets
                 List<Integer> chosen = agent.chooseSubset(
                         gameState + "\nCONTEXT: " + context, options,
                         "Choose " + minTargets + " to " + maxTargets + " targets.");
-
-                int added = 0;
                 for (int idx : chosen) {
-                    if (idx >= 0 && idx < targetObjects.size() && added < maxTargets) {
-                        Object target = targetObjects.get(idx);
-                        if (target instanceof Card c) {
-                            currentAbility.getTargets().add(c);
-                            added++;
-                        } else if (target instanceof Player p) {
-                            currentAbility.getTargets().add(p);
-                            added++;
-                        }
+                    if (idx >= 0 && idx < targetObjects.size() && chosenTargets.size() < maxTargets) {
+                        chosenTargets.add(targetObjects.get(idx));
                     }
-                }
-
-                if (added >= minTargets) {
-                    return true;
                 }
             }
 
-            // If we failed to get enough targets, fall back to heuristic
-            currentAbility.getTargets().clear();
-            return super.chooseTargetsFor(currentAbility);
+            if (chosenTargets.size() < minTargets) {
+                // Couldn't get enough targets - fall back
+                currentAbility.clearTargets();
+                return super.chooseTargetsFor(currentAbility);
+            }
+
+            // ----- commit targets (with divided allocation when applicable) -----
+            if (divided) {
+                int[] allocation = chooseDividedAllocation(
+                        currentAbility, chosenTargets, totalToDivide, gameState);
+
+                for (int i = 0; i < chosenTargets.size(); i++) {
+                    GameObject t = chosenTargets.get(i);
+                    if (t instanceof Card c) {
+                        currentAbility.getTargets().add(c);
+                    } else if (t instanceof Player p) {
+                        currentAbility.getTargets().add(p);
+                    }
+                    currentAbility.addDividedAllocation(t, allocation[i]);
+                }
+
+                // sanity: total must match
+                if (currentAbility.getTotalDividedValue() != totalToDivide) {
+                    currentAbility.clearTargets();
+                    return super.chooseTargetsFor(currentAbility);
+                }
+            } else {
+                for (GameObject t : chosenTargets) {
+                    if (t instanceof Card c) {
+                        currentAbility.getTargets().add(c);
+                    } else if (t instanceof Player p) {
+                        currentAbility.getTargets().add(p);
+                    }
+                }
+            }
+
+            return true;
         } catch (Exception e) {
-            currentAbility.getTargets().clear();
+            currentAbility.clearTargets();
             return super.chooseTargetsFor(currentAbility);
         }
+    }
+
+    /**
+     * Ask the LLM how to split `total` among `targets`. Returns an int[] of
+     * length targets.size() summing to `total`, with each entry >= 1.
+     *
+     * Falls back to an even split (with remainder on the first target) if the
+     * LLM response is unparseable or invalid.
+     */
+    private int[] chooseDividedAllocation(SpellAbility sa, List<GameObject> targets,
+                                          int total, String gameState) {
+        int n = targets.size();
+        int[] result = new int[n];
+
+        // Trivial cases
+        if (n == 1) {
+            result[0] = total;
+            return result;
+        }
+        // If total < n, we can't give each target >=1. The engine should have
+        // prevented selecting this many targets, but guard anyway.
+        if (total < n) {
+            // Give 1 to the first `total` targets, 0 to the rest. This will
+            // fail validation downstream and trigger the heuristic fallback,
+            // which is the right behavior.
+            for (int i = 0; i < n; i++) {
+                result[i] = i < total ? 1 : 0;
+            }
+            return result;
+        }
+
+        // Build the prompt
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("GAME STATE:\n").append(gameState).append("\n\n");
+        prompt.append("Distribute exactly ").append(total)
+                .append(" among these ").append(n).append(" targets of ")
+                .append(sa.getHostCard().getName()).append(" (")
+                .append(sa.getDescription().replace("\\n", " ")).append(").\n");
+        prompt.append("Each target must receive at least 1. The amounts must sum to exactly ")
+                .append(total).append(".\n\n");
+        prompt.append("TARGETS:\n");
+        for (int i = 0; i < n; i++) {
+            GameObject t = targets.get(i);
+            String desc;
+            if (t instanceof Card c) {
+                String owner = c.getController() == player ? "(yours) " : "(opponent's) ";
+                desc = owner + cardToStringCompact(c);
+            } else if (t instanceof Player p) {
+                desc = playerTag(p) + " (" + p.getLife() + " life)";
+            } else {
+                desc = t.toString();
+            }
+            prompt.append(i).append(": ").append(desc).append("\n");
+        }
+        prompt.append("\nRespond with ONLY ").append(n)
+                .append(" comma-separated integers in target order, e.g. ");
+        // Show an example: even split
+        int base = total / n;
+        int rem = total - base * n;
+        StringBuilder example = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            if (i > 0) example.append(",");
+            example.append(base + (i < rem ? 1 : 0));
+        }
+        prompt.append(example).append(" (sums to ").append(total).append(").");
+
+        String response = agent.chooseRaw(prompt.toString());
+
+        // Parse: extract integers in order
+        int[] parsed = new int[n];
+        int idx = 0;
+        Matcher m = Pattern.compile("-?\\d+").matcher(response);
+        while (m.find() && idx < n) {
+            try {
+                parsed[idx++] = Integer.parseInt(m.group());
+            } catch (NumberFormatException ignored) {}
+        }
+
+        boolean valid = (idx == n);
+        if (valid) {
+            int sum = 0;
+            for (int v : parsed) {
+                if (v < 1) { valid = false; break; }
+                sum += v;
+            }
+            if (valid && sum != total) valid = false;
+        }
+
+        if (valid) {
+            return parsed;
+        }
+
+        // Fallback: even split with remainder on first targets
+        for (int i = 0; i < n; i++) {
+            result[i] = base + (i < rem ? 1 : 0);
+        }
+        return result;
     }
 
     @Override
@@ -2673,8 +2862,21 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             String hostName = sa != null && sa.getHostCard() != null
                     ? sa.getHostCard().getName() : "an effect";
-            String question = hostName + " - pay " + cost + " to prevent effect? - " + sa.getStackDescription();
-            return agent.chooseYesNo(gameState, question);
+            String question = hostName + " - pay " + cost + " to prevent effect? - "
+                    + (sa != null ? sa.getStackDescription() : "");
+
+            boolean wantsToPay = agent.chooseYesNo(gameState, question);
+            if (!wantsToPay) {
+                return false;
+            }
+
+            // LLM said yes — now actually pay the cost
+            if (!ComputerUtilCost.canPayCost(cost, sa, player, true)) {
+                return false;  // can't afford, even though we'd like to
+            }
+            final CostPayment pay = new CostPayment(cost, sa);
+            return pay.payComputerCosts(new AiCostDecision(player, sa, true));
+
         } catch (Exception e) {
             System.err.println("[ExternalAI] payCostToPreventEffect FELL BACK: " + e);
             e.printStackTrace();
