@@ -345,7 +345,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     // ===================================================================
-    // STRATEGIC DECISIONS — routed to external LLM
+    // STRATEGIC DECISIONS - routed to external LLM
     // ===================================================================
 
     @Override
@@ -753,7 +753,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             String question = message != null ? message : "Confirm action?";
             if (sa != null && sa.getHostCard() != null) {
-                question = sa.getHostCard().getName() + " — " + question;
+                question = sa.getHostCard().getName() + " - " + question;
             }
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
@@ -850,6 +850,37 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
     }
 
+    private boolean canAffordMode(SpellAbility sa, AbilitySub mode) {
+        try {
+            Cost combined = sa.getPayCosts() != null ? sa.getPayCosts().copy() : new Cost("0", false);
+
+            // Tiered modes store the additional cost in the "ModeCost" param,
+            // as a bare generic number (e.g. "0", "2", "5"). Not in mode.getPayCosts().
+            String modeCostStr = mode.getParam("ModeCost");
+            if (modeCostStr != null && !modeCostStr.isEmpty()) {
+                try {
+                    combined.add(new Cost(modeCostStr, false));
+                } catch (Exception ignored) {
+                    // malformed cost string — fall through
+                }
+            }
+
+            // Fallback: if the mode also has a real Cost on its AbilitySub (other mechanics
+            // beyond Tiered may use this), include it.
+            Cost modeStructuredCost = mode.getPayCosts();
+            if (modeStructuredCost != null) {
+                combined.add(modeStructuredCost);
+            }
+
+            SpellAbility probe = sa.copy();
+            probe.setPayCosts(combined);
+            probe.setActivatingPlayer(player);
+            return ComputerUtilCost.canPayCost(probe, player, false);
+        } catch (Exception e) {
+            return true;  // unsure → don't hide it
+        }
+    }
+
     // ---------------------------------------------------------------
     // CHOOSE MODE FOR ABILITY (Charms, Commands, MDFCs)
     // ---------------------------------------------------------------
@@ -857,16 +888,31 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public List<AbilitySub> chooseModeForAbility(SpellAbility sa, List<AbilitySub> possible,
                                                  int min, int num, boolean allowRepeat) {
         try {
-            if (possible.size() <= min) {
-                return possible;
+
+            List<AbilitySub> affordable = new ArrayList<>();
+            for (AbilitySub mode : possible) {
+                if (canAffordMode(sa, mode)) {
+                    affordable.add(mode);
+                }
+            }
+
+            List<AbilitySub> pool = (affordable.size() >= min) ? affordable : possible;
+
+            if (pool.size() <= min) {
+                return new ArrayList<>(pool);
             }
 
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
-            for (AbilitySub mode : possible) {
+            for (AbilitySub mode : pool) {
                 String desc = mode.getDescription();
-                if (desc == null || desc.isEmpty()) {
-                    desc = mode.toString();
+                if (desc == null || desc.isEmpty()) desc = mode.toString();
+
+                String modeCostStr = mode.getParam("ModeCost");
+                if (modeCostStr != null && !modeCostStr.isEmpty()) {
+                    desc = "[+{" + modeCostStr + "}] " + desc;
+                } else if (mode.getPayCosts() != null && !mode.getPayCosts().toString().isEmpty()) {
+                    desc = "[+" + mode.getPayCosts() + "] " + desc;
                 }
                 options.add(desc);
             }
@@ -875,21 +921,19 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + sa.getHostCard().getName() + "."
                     + (allowRepeat ? " You may choose the same mode more than once." : "");
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
-                    "Choose the most impactful modes for the current game state.");
+            List<Integer> chosen = agent.chooseSubset(gameState, options, context);
 
             List<AbilitySub> result = new ArrayList<>();
             for (int idx : chosen) {
-                if (idx >= 0 && idx < possible.size() && result.size() < num) {
-                    if (allowRepeat || !result.contains(possible.get(idx))) {
-                        result.add(possible.get(idx));
+                if (idx >= 0 && idx < pool.size() && result.size() < num) {
+                    if (allowRepeat || !result.contains(pool.get(idx))) {
+                        result.add(pool.get(idx));
                     }
                 }
             }
 
             if (result.size() < min) {
-                for (AbilitySub mode : possible) {
+                for (AbilitySub mode : pool) {
                     if (!result.contains(mode) && result.size() < min) {
                         result.add(mode);
                     }
@@ -929,7 +973,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             String fullQuestion = question;
             if (sa != null && sa.getHostCard() != null) {
-                fullQuestion = sa.getHostCard().getName() + " — " + question;
+                fullQuestion = sa.getHostCard().getName() + " - " + question;
             }
             if (kindOfChoice != null) {
                 fullQuestion += " (Choice type: " + kindOfChoice + ")";
@@ -1049,7 +1093,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = message != null ? message : "Choose a color";
             if (sa != null && sa.getHostCard() != null) {
-                context = sa.getHostCard().getName() + " — " + context;
+                context = sa.getHostCard().getName() + " - " + context;
                 context += "\nFrom effect: " + sa.getDescription();
             }
 
@@ -1080,7 +1124,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = message != null ? message : "Choose a color";
             if (c != null) {
-                context = c.getName() + " — " + context;
+                context = c.getName() + " - " + context;
             }
 
             int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
@@ -1114,7 +1158,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String context = (message != null ? message : "Choose colors")
                     + " (choose " + min + " to " + max + ")";
             if (sa != null && sa.getHostCard() != null) {
-                context = sa.getHostCard().getName() + " — " + context;
+                context = sa.getHostCard().getName() + " - " + context;
                 context += "\nFrom effect: " + sa.getDescription();
             }
 
@@ -1147,7 +1191,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     // ===================================================================
-    // DELEGATED TO FALLBACK AI — mechanical / trivial decisions
+    // DELEGATED TO FALLBACK AI - mechanical / trivial decisions
     // ===================================================================
 
     @Override
@@ -1240,7 +1284,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public Integer announceRequirements(SpellAbility ability, int min, int max, String announce) {
-        // Keep the hardcoded mana logic for specific APIs — LLM can't do mana math
+        // Keep the hardcoded mana logic for specific APIs - LLM can't do mana math
         if (ability.getApi() != null) {
             switch (ability.getApi()) {
                 case ChooseNumber:
@@ -1266,7 +1310,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = "Choose a number for " + ability.getHostCard().getName();
             if (announce != null) {
-                context += " — " + announce;
+                context += " - " + announce;
             }
             context += "\nRange: " + min + " to " + max;
             context += "\nHigher usually means stronger effect but higher cost.";
@@ -1384,7 +1428,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             int maxTargets = tgt.getMaxTargets(currentAbility.getHostCard(), currentAbility);
 
             if (maxTargets == 1) {
-                // Single target — use chooseAction
+                // Single target - use chooseAction
                 int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
                 if (choice >= 0 && choice < targetObjects.size()) {
                     Object target = targetObjects.get(choice);
@@ -1396,7 +1440,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     return true;
                 }
             } else {
-                // Multiple targets — use chooseSubset
+                // Multiple targets - use chooseSubset
                 List<Integer> chosen = agent.chooseSubset(
                         gameState + "\nCONTEXT: " + context, options,
                         "Choose " + minTargets + " to " + maxTargets + " targets.");
@@ -1490,7 +1534,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             if (sa != null && sa.getHostCard() != null) {
                 context.append(" (from ").append(sa.getHostCard().getName()).append(")");
             }
-            context.append(isOptional ? "\nThis is optional — you may skip." : "");
+            context.append(isOptional ? "\nThis is optional - you may skip." : "");
 
             // Flatten all categories into one list with labels
             List<String> options = new ArrayList<>();
@@ -1655,7 +1699,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             String fullQuestion = question != null ? question : "Apply replacement effect?";
             if (effectSA != null && effectSA.getHostCard() != null) {
-                fullQuestion = effectSA.getHostCard().getName() + " — " + fullQuestion;
+                fullQuestion = effectSA.getHostCard().getName() + " - " + fullQuestion;
             }
             if (affected != null) {
                 fullQuestion += "\nAffected: " + affected.toString();
@@ -1678,7 +1722,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             String question = prompt != null ? prompt : "Pay this cost?";
             if (sa != null && sa.getHostCard() != null) {
-                question = sa.getHostCard().getName() + " — " + question;
+                question = sa.getHostCard().getName() + " - " + question;
             }
             if (costPart != null) {
                 question += "\nCost: " + costPart.toString();
@@ -1713,7 +1757,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             String context = "Order blockers for your attacker: " + cardToStringCompact(attacker)
-                    + "\nDamage is assigned in this order — first blocker takes damage first."
+                    + "\nDamage is assigned in this order - first blocker takes damage first."
                     + "\nPut the creature you most want to kill first.";
 
             List<Integer> ordering = agent.chooseOrdering(
@@ -1797,7 +1841,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             String context = "Order attackers for your blocker: " + cardToStringCompact(blocker)
-                    + "\nYour blocker assigns damage in this order — first attacker takes damage first."
+                    + "\nYour blocker assigns damage in this order - first attacker takes damage first."
                     + "\nPut the creature you most want to kill first.";
 
             List<Integer> ordering = agent.chooseOrdering(
@@ -1920,14 +1964,14 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
 
             if (!cardsOfType.isEmpty()) {
-                // We have a matching type — choose which one to discard (just 1)
+                // We have a matching type - choose which one to discard (just 1)
                 List<String> options = new ArrayList<>();
                 for (Card c : cardsOfType) {
                     options.add(c.getName() + " " + c.getManaCost());
                 }
 
                 String context = "You may discard a " + typesDesc + " card (just 1) instead of discarding "
-                        + num + " cards. Choose which " + typesDesc + " to discard — pick your least valuable.";
+                        + num + " cards. Choose which " + typesDesc + " to discard - pick your least valuable.";
 
                 int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
 
@@ -1936,7 +1980,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
                 return new CardCollection(cardsOfType.get(0));
             } else {
-                // No matching type — must discard N cards
+                // No matching type - must discard N cards
                 List<String> options = new ArrayList<>();
                 for (Card c : hand) {
                     if (c.isLand()) {
@@ -2061,7 +2105,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             String context = "Multiple abilities are triggering simultaneously."
-                    + "\nOrder them — first in the list resolves LAST (stack order)."
+                    + "\nOrder them - first in the list resolves LAST (stack order)."
                     + "\nPut the ability you want to resolve first at the END.";
 
             List<Integer> ordering = agent.chooseOrdering(
@@ -2241,8 +2285,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 optionDescs.add(desc);
             }
 
-            String context = sa.getHostCard().getName() + " — " + prompt
-                    + (optional ? "\nVoting is optional — you may abstain." : "");
+            String context = sa.getHostCard().getName() + " - " + prompt
+                    + (optional ? "\nVoting is optional - you may abstain." : "");
 
             int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, optionDescs);
 
@@ -2273,7 +2317,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             String context = "Mulligan: put " + cardsToReturn + " card(s) from your hand on the bottom of your library."
-                    + "\nKeep your best cards — put back lands if you have too many, or expensive spells you can't cast early.";
+                    + "\nKeep your best cards - put back lands if you have too many, or expensive spells you can't cast early.";
 
             List<Integer> chosen = agent.chooseSubset(
                     gameState + "\nCONTEXT: " + context, options,
@@ -2330,7 +2374,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public ICardFace chooseSingleCardFace(SpellAbility sa, String message,
                                           Predicate<ICardFace> cpp, String name) {
-        // Predicate-based — potentially huge list. Heuristic handles better.
+        // Predicate-based - potentially huge list. Heuristic handles better.
         return super.chooseSingleCardFace(sa, message, cpp, name);
     }
 
@@ -2349,7 +2393,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = message != null ? message : "Choose a card face";
             if (sa != null && sa.getHostCard() != null) {
-                context = sa.getHostCard().getName() + " — " + context;
+                context = sa.getHostCard().getName() + " - " + context;
             }
 
             int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
@@ -2379,7 +2423,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = message != null ? message : "Choose a card state";
             if (sa != null && sa.getHostCard() != null) {
-                context = sa.getHostCard().getName() + " — " + context;
+                context = sa.getHostCard().getName() + " - " + context;
             }
 
             int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
@@ -2439,7 +2483,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = (prompt != null ? prompt : "Choose a counter type");
             if (sa != null && sa.getHostCard() != null) {
-                context = sa.getHostCard().getName() + " — " + context;
+                context = sa.getHostCard().getName() + " - " + context;
             }
 
             int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, optionDescs);
@@ -2463,7 +2507,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String gameState = serializeGameState();
             String context = sa.getHostCard().getName()
-                    + " — Choose a keyword to give to " + cardToStringCompact(tgtCard) +
+                    + " - Choose a keyword to give to " + cardToStringCompact(tgtCard) +
                     " (has: " + tgtCard.getKeywords() + ")"
                     + (prompt != null ? "\n" + prompt : "");
 
@@ -2480,7 +2524,38 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public ReplacementEffect chooseSingleReplacementEffect(List<ReplacementEffect> possibleReplacers) {
-        return super.chooseSingleReplacementEffect(possibleReplacers);
+        // Match heuristic AI behavior: empty/single → return first (no choice to make).
+        // Only consult LLM when there's a real choice between competing replacements.
+        if (possibleReplacers == null || possibleReplacers.isEmpty()) {
+            return null;  // matches what list.get(0) would do on empty (NPE-safe variant)
+        }
+        if (possibleReplacers.size() == 1) {
+            return possibleReplacers.get(0);
+        }
+
+        try {
+            String gameState = serializeGameState();
+            List<String> options = new ArrayList<>();
+            for (ReplacementEffect re : possibleReplacers) {
+                Card host = re.getHostCard();
+                String hostName = host != null ? host.getName() : "unknown";
+                String desc = re.getDescription();
+                if (desc == null || desc.isEmpty()) desc = re.toString();
+                options.add(hostName + " - " + desc);
+            }
+
+            String context = "Chose which replacement effect to apply.";
+
+            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            if (choice >= 0 && choice < possibleReplacers.size()) {
+                return possibleReplacers.get(choice);
+            }
+            return possibleReplacers.get(0);
+        } catch (Exception e) {
+            System.err.println("[ExternalAI] chooseSingleReplacementEffect FELL BACK: " + e);
+            e.printStackTrace();
+            return super.chooseSingleReplacementEffect(possibleReplacers);
+        }
     }
 
     @Override
@@ -2497,7 +2572,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String gameState = serializeGameState();
 
-            String context = sa.getHostCard().getName() + " — Choose protection type."
+            String context = sa.getHostCard().getName() + " - Choose protection type."
                     + "\nPick the color or type that blocks the most threats on the board."
                     + "\nProtection prevents damage, blocking, targeting, and enchanting from that source.";
 
@@ -2594,7 +2669,17 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public boolean payCostToPreventEffect(Cost cost, SpellAbility sa, boolean alreadyPaid,
                                           FCollectionView<Player> allPayers) {
-        return super.payCostToPreventEffect(cost, sa, alreadyPaid, allPayers);
+        try {
+            String gameState = serializeGameState();
+            String hostName = sa != null && sa.getHostCard() != null
+                    ? sa.getHostCard().getName() : "an effect";
+            String question = hostName + " - pay " + cost + " to prevent effect? - " + sa.getStackDescription();
+            return agent.chooseYesNo(gameState, question);
+        } catch (Exception e) {
+            System.err.println("[ExternalAI] payCostToPreventEffect FELL BACK: " + e);
+            e.printStackTrace();
+            return super.payCostToPreventEffect(cost, sa, alreadyPaid, allPayers);
+        }
     }
 
     @Override
@@ -2732,7 +2817,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             String context = "Choose " + min + " to " + max + " card(s) to reveal from your hand."
-                    + "\nRevealing gives your opponent information — reveal cards they already know about"
+                    + "\nRevealing gives your opponent information - reveal cards they already know about"
                     + " or cards that matter least to keep hidden.";
 
             List<Integer> chosen = agent.chooseSubset(
@@ -2842,7 +2927,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public List<OptionalCostValue> chooseOptionalCosts(SpellAbility chosen,
                                                        List<OptionalCostValue> optionalCostValues) {
         // Decision is made at action-selection time now. Echo only what's marked,
-        // never prompt — prevents speculative instant-speed kicker questions.
+        // never prompt - prevents speculative instant-speed kicker questions.
         List<OptionalCostValue> result = new ArrayList<>();
         for (OptionalCostValue ocv : optionalCostValues) {
             if (chosen.isOptionalCostPaid(ocv.getType())) {
