@@ -328,7 +328,20 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             prefix = "Cast ";
             desc = c.getType().toString() + " " + c.getOracleText().replace("\\n", " ");
         }
-        return prefix + c.getName() + ": " + desc;
+
+        StringBuilder tags = new StringBuilder();
+        try {
+            if (!sa.getPayCosts().toString().isEmpty()) {
+                tags.append(" [cost: "+sa.getPayCosts()+"]");
+            }
+            for (OptionalCost cost : OptionalCost.values()) {
+                if (sa.isOptionalCostPaid(cost)) tags.append(" ["+cost.toString()+"]");
+            }
+        } catch (Exception ignored) {
+            // never let label-building abort the whole decision
+        }
+
+        return prefix + c.getName() + tags + ": " + desc;
     }
 
     // ===================================================================
@@ -341,7 +354,15 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
 
             CardCollection cards = ComputerUtilAbility.getAvailableCards(getGame(), player);
-            List<SpellAbility> spellAbilities = ComputerUtilAbility.getSpellAbilities(cards, player);
+            List<SpellAbility> baseAbilities = ComputerUtilAbility.getSpellAbilities(cards, player);
+
+            // Expand each base SA into all alternative-cost and optional-cost variants
+            // (kicked, buyback, flashback, "pay 2 life untapped" shockland modes, etc.),
+            // exactly like the heuristic AiController does. Each variant is a distinct
+            // SpellAbility with the optional costs already baked into its pay cost and
+            // its isOptionalCostPaid()/isKicked() flags already set.
+            List<SpellAbility> spellAbilities =
+                    new ArrayList<>(ComputerUtilAbility.getOriginalAndAltCostAbilities(baseAbilities, player));
 
             spellAbilities.removeIf(sa -> sa.isManaAbility() || sa.isLandAbility());
 
@@ -362,12 +383,23 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
-                if (!sa.canPlay(true)) continue;
+                if (!sa.canPlay(false)) continue;          // <-- false: don't probe optional costs here
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
                 if (sa.usesTargeting() && !ComputerUtilAbility.isFullyTargetable(sa)) continue;
 
+                // Base (unkicked) action
                 actions.add(saToString(sa));
                 actionSources.add(sa);
+
+                // Manually offer each affordable optional-cost variant as its own action
+                for (OptionalCostValue ocv : GameActionUtil.getOptionalCostValues(sa)) {
+                    SpellAbility withOpt = GameActionUtil.addOptionalCosts(sa, new ArrayList<>(List.of(ocv)));
+                    withOpt.setActivatingPlayer(player);
+                    if (withOpt.canPlay() && ComputerUtilCost.canPayCost(withOpt, player, false)) {
+                        actions.add(saToString(withOpt));   // your tag loop now prints [Kicker1]
+                        actionSources.add(withOpt);
+                    }
+                }
             }
 
             if (actions.size() <= 1) {
@@ -395,6 +427,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return null;
         } catch (Exception e) {
+            System.err.println("[ExternalAI] chooseSpellAbilityToPlay failed, falling back: " + e);
+            e.printStackTrace();
             return super.chooseSpellAbilityToPlay();
         }
     }
@@ -723,6 +757,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
+            System.err.println("[ExternalAI] confirmAction FELL BACK: " + e);
+            e.printStackTrace();
             return super.confirmAction(sa, mode, message, options, cardToShow, params);
         }
     }
@@ -857,6 +893,23 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     if (!result.contains(mode) && result.size() < min) {
                         result.add(mode);
                     }
+                }
+            }
+
+            // Set up targets for each chosen mode
+            for (AbilitySub mode : result) {
+                if (mode.usesTargeting()) {
+                    mode.resetTargets();
+                    chooseTargetsFor(mode);
+                }
+                // Also handle sub-abilities of each mode
+                SpellAbility sub = mode.getSubAbility();
+                while (sub != null) {
+                    if (sub.usesTargeting()) {
+                        sub.resetTargets();
+                        chooseTargetsFor(sub);
+                    }
+                    sub = sub.getSubAbility();
                 }
             }
 
@@ -2771,40 +2824,32 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         super.revealUnsupported(unsupported);
     }
 
+    private boolean canAffordOptionalCost(SpellAbility sa, OptionalCostValue ocv) {
+        try {
+            Cost combined = sa.getPayCosts().copy();
+            combined.add(ocv.getCost());
+            combined = CostAdjustment.adjust(combined, sa, false);
+            SpellAbility probe = sa.copy();
+            probe.setPayCosts(combined);
+            probe.setActivatingPlayer(player);
+            return ComputerUtilCost.canPayCost(probe, player, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     @Override
     public List<OptionalCostValue> chooseOptionalCosts(SpellAbility chosen,
                                                        List<OptionalCostValue> optionalCostValues) {
-        try {
-            if (optionalCostValues.isEmpty()) {
-                return super.chooseOptionalCosts(chosen, optionalCostValues);
+        // Decision is made at action-selection time now. Echo only what's marked,
+        // never prompt — prevents speculative instant-speed kicker questions.
+        List<OptionalCostValue> result = new ArrayList<>();
+        for (OptionalCostValue ocv : optionalCostValues) {
+            if (chosen.isOptionalCostPaid(ocv.getType())) {
+                result.add(ocv);
             }
-
-            String gameState = serializeGameState();
-            List<String> options = new ArrayList<>();
-            for (OptionalCostValue ocv : optionalCostValues) {
-                options.add(ocv.getType().toString() + " — " + ocv.getCost().toString());
-            }
-
-            String context = chosen.getHostCard().getName()
-                    + " — Choose which optional costs to pay (e.g. Kicker, Buyback, Entwine)."
-                    + "\nOnly pay if you have the mana AND the effect is worth it."
-                    + "\nAvailable mana: " + buildAvailableMana(player);
-
-            List<Integer> chosenIndices = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
-                    "Choose optional costs to pay, or NONE to skip all.");
-
-            List<OptionalCostValue> result = new ArrayList<>();
-            for (int idx : chosenIndices) {
-                if (idx >= 0 && idx < optionalCostValues.size()) {
-                    result.add(optionalCostValues.get(idx));
-                }
-            }
-
-            return result;
-        } catch (Exception e) {
-            return super.chooseOptionalCosts(chosen, optionalCostValues);
         }
+        return result;
     }
 
     @Override

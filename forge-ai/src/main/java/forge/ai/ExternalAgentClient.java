@@ -186,7 +186,6 @@ public class ExternalAgentClient {
         if (Boolean.getBoolean("forge.external.agent.manual")) {
             Logger.info("human-player");
             Logger.info("=== LLM REQUEST ===\n{}", userMessage);
-            System.out.println("\n" + userMessage);
             System.out.print("YOUR CHOICE> ");
             String input = new java.util.Scanner(System.in).nextLine().trim();
             Logger.info("=== LLM RESPONSE ===\n{}\n====================", input);
