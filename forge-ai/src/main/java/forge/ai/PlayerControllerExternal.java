@@ -1042,15 +1042,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public List<AbilitySub> chooseModeForAbility(SpellAbility sa, List<AbilitySub> possible,
                                                  int min, int num, boolean allowRepeat) {
-        System.err.println("[chooseModeForAbility] sa=" + sa.getHostCard().getName()
-                + " saId=" + System.identityHashCode(sa)
-                + " forgeId=" + sa.getId()
-                + " possibleModes=" + possible.size());
-        for (int i = 0; i < possible.size(); i++) {
-            System.err.println("  mode[" + i + "] id=" + System.identityHashCode(possible.get(i))
-                    + " desc=" + possible.get(i).getDescription());
-        }
-        new Throwable("trace").printStackTrace(System.err);
 
         try {
 
@@ -1598,13 +1589,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
-
-        System.err.println("[chooseTargetsFor] sa=" + currentAbility.getHostCard().getName()
-                + " saId=" + System.identityHashCode(currentAbility)
-                + " forgeId=" + System.identityHashCode(currentAbility.getId())
-                + " hasTargetRestrictions=" + (currentAbility.getTargetRestrictions() != null)
-                + " desc=" + currentAbility.getDescription());
-        new Throwable("trace").printStackTrace(System.err);
 
         try {
 
