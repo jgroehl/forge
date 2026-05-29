@@ -126,6 +126,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             sb.append("\n");
 
+            sb.append(tag).append("_deck: ").append(p.getCardsIn(ZoneType.Library).size()).append(" cards");
+
             sb.append(tag).append("_board: ");
             List<String> boardCards = new ArrayList<>();
             for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
@@ -142,6 +144,17 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     graveCards.add(c.getName());
                 }
                 sb.append(String.join(", ", graveCards));
+                sb.append("\n");
+            }
+
+            CardCollectionView exile = p.getCardsIn(ZoneType.Exile);
+            if (!exile.isEmpty()) {
+                sb.append(tag).append("_exile: ");
+                List<String> exileCards = new ArrayList<>();
+                for (Card c : exile) {
+                    exileCards.add(c.getName());
+                }
+                sb.append(String.join(", ", exileCards));
                 sb.append("\n");
             }
         }
@@ -289,9 +302,18 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         if (c.isSick()) sb.append(" (summoning sick)");
         Map<CounterType, Integer> counters = c.getCounters();
         if (!counters.isEmpty()) {
-            sb.append("[");
+            sb.append(" [");
             counters.forEach((type, count) ->
                     sb.append(type).append("=").append(count).append(","));
+            sb.setLength(sb.length() - 1);
+            sb.append("] ");
+        }
+
+        List<KeywordInterface> keywords = c.getKeywords();
+        if (!keywords.isEmpty()) {
+            sb.append(" [");
+            keywords.forEach((kw) ->
+                    sb.append(kw).append(","));
             sb.setLength(sb.length() - 1);
             sb.append("] ");
         }
@@ -316,7 +338,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             sb.setLength(sb.length() - 1);
             sb.append("] ");
         }
-        sb.append(c.getOracleText().replace("\\n", " "));
+        sb.append(" ").append(c.getOracleText().replace("\\n", " "));
         return sb.toString();
     }
 
@@ -872,7 +894,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public boolean mulliganKeepHand(Player firstPlayer, int cardsToReturn) {
         try {
             String gameState = serializeGameState();
-            StringBuilder handDesc = new StringBuilder("\nCards to return if you mulligan: ");
+            StringBuilder handDesc = new StringBuilder();
+            handDesc.append("Current cards in Hand:");
+            for (Card c : player.getCardsIn(ZoneType.Hand)) {
+                handDesc.append("\n").append(cardToString(c));
+            }
+            handDesc.append("\nCards to return if you mulligan: ");
             handDesc.append(cardsToReturn);
             return agent.chooseYesNo(gameState + "\n" + handDesc,
                     "Keep this hand? (YES = keep, NO = mulligan)");
@@ -887,7 +914,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             for (Card c : topN) {
-                options.add(c.getName());
+                options.add(cardToString(c));
             }
 
             List<Integer> keepOnTop = agent.chooseSubset(
@@ -916,7 +943,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             for (Card c : topN) {
-                options.add(c.getName());
+                options.add(cardToString(c));
             }
 
             List<Integer> keepOnTop = agent.chooseSubset(
@@ -2594,11 +2621,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             for (Card c : hand) {
-                if (c.isLand()) {
-                    options.add(c.getName());
-                } else {
-                    options.add(c.getName() + " " + c.getManaCost());
-                }
+                options.add(cardToString(c));
             }
 
             String context = "Mulligan: put " + cardsToReturn + " card(s) from your hand on the bottom of your library."
@@ -3000,9 +3023,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             // Canonicalize: sort the colored pips so UB and BU collapse.
             // Generic numbers and X are kept positionally at the start.
             String canonical = canonicalizeCostString(raw);
-
-            System.err.println("[ExternalAI enum] raw='" + raw + "' canonical='" + canonical + "'");
-
 
             if (seenCanonical.add(canonical)) {
                 try {
