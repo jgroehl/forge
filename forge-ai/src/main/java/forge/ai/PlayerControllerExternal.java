@@ -129,6 +129,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             sb.append("\n");
 
             sb.append(tag).append("_deck: ").append(p.getCardsIn(ZoneType.Library).size()).append(" cards");
+            sb.append("\n");
 
             sb.append(tag).append("_board: ");
             List<String> boardCards = new ArrayList<>();
@@ -457,7 +458,11 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     for (Player p : getGame().getPlayers()) {
                         if (sa.canTarget(p)) { anyPlayerTarget = true; break; }
                     }
-                    if (!anyCardTarget && !anyPlayerTarget) continue;
+                    boolean anyStackTarget = false;
+                    for (SpellAbilityStackInstance si : getGame().getStack()) {
+                        if (sa.canTarget(si.getSpellAbility())) { anyStackTarget = true; break; }
+                    }
+                    if (!anyCardTarget && !anyPlayerTarget && !anyStackTarget) continue;
                 }
 
                 // Base (unkicked) action
@@ -1537,22 +1542,22 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return super.chooseNewTargetsFor(ability, filter, optional);
     }
 
-    private void fireBecomesTargetTriggers(SpellAbility sa) {
-        if (sa == null || sa.getTargets() == null || sa.getTargets().isEmpty()) return;
-        for (GameObject tgt : sa.getTargets()) {
-            Map<AbilityKey, Object> runParams = AbilityKey.newMap();
-            runParams.put(AbilityKey.SourceSA, sa);
-            runParams.put(AbilityKey.Target, tgt);
-            getGame().getTriggerHandler().runTrigger(
-                    TriggerType.BecomesTarget, runParams, false);
-        }
-        // Also fire the "becomes target once" trigger (different event in Forge)
-        Map<AbilityKey, Object> onceParams = AbilityKey.newMap();
-        onceParams.put(AbilityKey.SourceSA, sa);
-        onceParams.put(AbilityKey.Targets, sa.getTargets());
-        getGame().getTriggerHandler().runTrigger(
-                TriggerType.BecomesTargetOnce, onceParams, false);
-    }
+//    private void fireBecomesTargetTriggers(SpellAbility sa) {
+//        if (sa == null || sa.getTargets() == null || sa.getTargets().isEmpty()) return;
+//        for (GameObject tgt : sa.getTargets()) {
+//            Map<AbilityKey, Object> runParams = AbilityKey.newMap();
+//            runParams.put(AbilityKey.SourceSA, sa);
+//            runParams.put(AbilityKey.Target, tgt);
+//            getGame().getTriggerHandler().runTrigger(
+//                    TriggerType.BecomesTarget, runParams, false);
+//        }
+//        // Also fire the "becomes target once" trigger (different event in Forge)
+//        Map<AbilityKey, Object> onceParams = AbilityKey.newMap();
+//        onceParams.put(AbilityKey.SourceSA, sa);
+//        onceParams.put(AbilityKey.Targets, sa.getTargets());
+//        getGame().getTriggerHandler().runTrigger(
+//                TriggerType.BecomesTargetOnce, onceParams, false);
+//    }
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
@@ -1574,10 +1579,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             // See SpellAbility.clearTargets() in the engine.
             currentAbility.clearTargets();
 
-            // Get all valid targets
             CardCollectionView validCards = CardUtil.getValidCardsToTarget(currentAbility);
 
-            // Also check for player targets
             List<Player> validPlayers = new ArrayList<>();
             for (Player p : getGame().getPlayers()) {
                 if (currentAbility.canTarget(p)) {
@@ -1585,8 +1588,15 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
             }
 
-            // If no valid targets at all, fall back
-            if (validCards.isEmpty() && validPlayers.isEmpty()) {
+            List<SpellAbility> validStackSAs = new ArrayList<>();
+            for (SpellAbilityStackInstance si : getGame().getStack()) {
+                SpellAbility stackSa = si.getSpellAbility();
+                if (currentAbility.canTarget(stackSa)) {
+                    validStackSAs.add(stackSa);
+                }
+            }
+
+            if (validCards.isEmpty() && validPlayers.isEmpty() && validStackSAs.isEmpty()) {
                 return super.chooseTargetsFor(currentAbility);
             }
 
@@ -1603,6 +1613,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             for (Player p : validPlayers) {
                 options.add(playerTag(p) + " (" + p.getLife() + " life)");
                 targetObjects.add(p);
+            }
+            for (SpellAbility stackSa : validStackSAs) {
+                Card host = stackSa.getHostCard();
+                String ownerTag = playerTag(host.getController());
+                options.add("SPELL ON STACK: " + host.getName() + " (cast by " + ownerTag + ")"
+                        + " — " + stackSa.getDescription());
+                targetObjects.add(stackSa);
             }
 
             if (options.isEmpty()) {
@@ -1664,6 +1681,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                         currentAbility.getTargets().add(c);
                     } else if (t instanceof Player p) {
                         currentAbility.getTargets().add(p);
+                    } else if (t instanceof SpellAbility stackSa) {
+                        currentAbility.getTargets().add(stackSa);
                     }
                     currentAbility.addDividedAllocation(t, allocation[i]);
                 }
@@ -1679,11 +1698,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                         currentAbility.getTargets().add(c);
                     } else if (t instanceof Player p) {
                         currentAbility.getTargets().add(p);
+                    } else if (t instanceof SpellAbility stackSa) {
+                        currentAbility.getTargets().add(stackSa);
                     }
                 }
             }
 
-            fireBecomesTargetTriggers(currentAbility);
+            //fireBecomesTargetTriggers(currentAbility);
 
             return true;
         } catch (Exception e) {
@@ -2920,39 +2941,44 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public ReplacementEffect chooseSingleReplacementEffect(List<ReplacementEffect> possibleReplacers) {
-        // Match heuristic AI behavior: empty/single → return first (no choice to make).
-        // Only consult LLM when there's a real choice between competing replacements.
-        if (possibleReplacers == null || possibleReplacers.isEmpty()) {
-            return null;  // matches what list.get(0) would do on empty (NPE-safe variant)
-        }
-        if (possibleReplacers.size() == 1) {
-            return possibleReplacers.get(0);
-        }
-
-        try {
-            String gameState = serializeGameState();
-            List<String> options = new ArrayList<>();
-            for (ReplacementEffect re : possibleReplacers) {
-                Card host = re.getHostCard();
-                String hostName = host != null ? host.getName() : "unknown";
-                String desc = re.getDescription();
-                if (desc == null || desc.isEmpty()) desc = re.toString();
-                options.add(hostName + " - " + desc);
-            }
-
-            String context = "Chose which replacement effect to apply.";
-
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
-            if (choice >= 0 && choice < possibleReplacers.size()) {
-                return possibleReplacers.get(choice);
-            }
-            return possibleReplacers.get(0);
-        } catch (Exception e) {
-            System.err.println("[ExternalAI] chooseSingleReplacementEffect FELL BACK: " + e);
-            e.printStackTrace();
-            return super.chooseSingleReplacementEffect(possibleReplacers);
-        }
+        return super.chooseSingleReplacementEffect(possibleReplacers);
     }
+
+//    @Override
+//    public ReplacementEffect chooseSingleReplacementEffect(List<ReplacementEffect> possibleReplacers) {
+//        // Match heuristic AI behavior: empty/single → return first (no choice to make).
+//        // Only consult LLM when there's a real choice between competing replacements.
+//        if (possibleReplacers == null || possibleReplacers.isEmpty()) {
+//            return null;  // matches what list.get(0) would do on empty (NPE-safe variant)
+//        }
+//        if (possibleReplacers.size() == 1) {
+//            return possibleReplacers.get(0);
+//        }
+//
+//        try {
+//            String gameState = serializeGameState();
+//            List<String> options = new ArrayList<>();
+//            for (ReplacementEffect re : possibleReplacers) {
+//                Card host = re.getHostCard();
+//                String hostName = host != null ? host.getName() : "unknown";
+//                String desc = re.getDescription();
+//                if (desc == null || desc.isEmpty()) desc = re.toString();
+//                options.add(hostName + " - " + desc);
+//            }
+//
+//            String context = "Chose which replacement effect to apply.";
+//
+//            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+//            if (choice >= 0 && choice < possibleReplacers.size()) {
+//                return possibleReplacers.get(choice);
+//            }
+//            return possibleReplacers.get(0);
+//        } catch (Exception e) {
+//            System.err.println("[ExternalAI] chooseSingleReplacementEffect FELL BACK: " + e);
+//            e.printStackTrace();
+//            return super.chooseSingleReplacementEffect(possibleReplacers);
+//        }
+//    }
 
     @Override
     public StaticAbility chooseSingleStaticAbility(List<StaticAbility> possibleStatics) {
