@@ -5,10 +5,12 @@ import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimap;
 
 import forge.LobbyPlayer;
+import forge.card.CardStateName;
 import forge.card.ColorSet;
 import forge.card.ICardFace;
 import forge.card.MagicColor;
 import forge.card.mana.ManaCost;
+import forge.card.mana.ManaCostParser;
 import forge.card.mana.ManaCostShard;
 import forge.deck.Deck;
 import forge.deck.DeckSection;
@@ -322,27 +324,45 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         Card c = sa.getHostCard();
         String prefix = "";
         String desc = "";
+
+        // Determine which face/state this SA represents
+        CardState saState = null;
+        try {
+            saState = sa.getCardState();
+        } catch (Exception ignored) {}
+
+        // Adventure / MDFC back / Omen: secondary state has its own name & text
+        String displayName = c.getName();
+        if (saState != null && saState.getStateName() == CardStateName.Secondary) {
+            displayName = saState.getName();
+        }
+
         if (sa.isAbility()) {
             prefix = "Activate ability ";
             desc = sa.getDescription().replace("\\n", " ");
         } else if (sa.isSpell()) {
             prefix = "Cast ";
-            desc = c.getType().toString() + " " + c.getOracleText().replace("\\n", " ");
+            if (saState != null) {
+                desc = saState.getType().toString() + " "
+                        + saState.getOracleText().replace("\\n", " ");
+            } else {
+                desc = c.getType().toString() + " " + c.getOracleText().replace("\\n", " ");
+            }
         }
 
         StringBuilder tags = new StringBuilder();
         try {
-            if (!sa.getPayCosts().toString().isEmpty()) {
-                tags.append(" [cost: "+sa.getPayCosts()+"]");
+            Cost payCost = sa.getPayCosts();
+            String costStr = payCost != null ? payCost.toString() : "";
+            if (!costStr.isEmpty()) {
+                tags.append(" [cost: ").append(costStr).append("]");
             }
             for (OptionalCost cost : OptionalCost.values()) {
-                if (sa.isOptionalCostPaid(cost)) tags.append(" ["+cost.toString()+"]");
+                if (sa.isOptionalCostPaid(cost)) tags.append(" [").append(cost.toString()).append("]");
             }
-        } catch (Exception ignored) {
-            // never let label-building abort the whole decision
-        }
+        } catch (Exception ignored) {}
 
-        return prefix + c.getName() + tags + ": " + desc;
+        return prefix + displayName + tags + ": " + desc;
     }
 
     // ===================================================================
@@ -384,7 +404,28 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
-                if (!sa.canPlay(false)) continue;          // <-- false: don't probe optional costs here
+
+                // CRITICAL: For adventure/secondary-face SAs, getPayCosts() may return
+                // the host card's cost (or empty) if the CardState is not properly bound.
+                // Guard against this: skip any non-land spell SA whose pay cost is null
+                // or empty, as it cannot be meaningfully validated or displayed.
+                if (sa.isSpell()) {
+                    Cost payCost = sa.getPayCosts();
+                    if (payCost == null || payCost.hasNoManaCost() && payCost.isOnlyManaCost()) {
+                        // Zero-cost spells (e.g. Ancestral Vision suspended, Force of Will
+                        // alternative cost) are legitimate — only skip if the cost object
+                        // itself is null or its string representation is empty AND the card
+                        // is not a known zero-mana spell.
+                        if (payCost == null) continue;
+                        // If the cost string is empty it means the SA was not properly
+                        // initialised — most likely an adventure whose CardState was not
+                        // bound. Skip it to avoid offering an unplayable action.
+                        String costStr = payCost.toString();
+                        if (costStr == null || costStr.isEmpty()) continue;
+                    }
+                }
+
+                if (!sa.canPlay(false)) continue;          // false: don't probe optional costs here
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
                 if (sa.usesTargeting() && !ComputerUtilAbility.isFullyTargetable(sa)) continue;
 
@@ -397,7 +438,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     SpellAbility withOpt = GameActionUtil.addOptionalCosts(sa, new ArrayList<>(List.of(ocv)));
                     withOpt.setActivatingPlayer(player);
                     if (withOpt.canPlay() && ComputerUtilCost.canPayCost(withOpt, player, false)) {
-                        actions.add(saToString(withOpt));   // your tag loop now prints [Kicker1]
+                        actions.add(saToString(withOpt));
                         actionSources.add(withOpt);
                     }
                 }
@@ -406,6 +447,19 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             if (actions.size() <= 1) {
                 return null;
             }
+
+            // Dedup actions with identical display strings
+            Set<String> seen = new HashSet<>();
+            List<String> dedupActions = new ArrayList<>();
+            List<Object> dedupSources = new ArrayList<>();
+            for (int i = 0; i < actions.size(); i++) {
+                if (seen.add(actions.get(i))) {
+                    dedupActions.add(actions.get(i));
+                    dedupSources.add(actionSources.get(i));
+                }
+            }
+            actions = dedupActions;
+            actionSources = dedupSources;
 
             int choice = agent.chooseAction(gameState, actions);
 
@@ -1296,23 +1350,34 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             if (sa.canPlay()) {
                 sa.resolve();
             }
-        } else {
-            // If the spell needs targets, set them up via LLM before playing
-            if (sa.usesTargeting() && (sa.getTargets() == null || sa.getTargets().isEmpty())) {
-                if (!chooseTargetsFor(sa)) {
-                    return false;
-                }
-            }
-            // Also handle sub-abilities that need targets
-            SpellAbility sub = sa.getSubAbility();
-            while (sub != null) {
-                if (sub.usesTargeting() && (sub.getTargets() == null || sub.getTargets().isEmpty())) {
-                    chooseTargetsFor(sub);
-                }
-                sub = sub.getSubAbility();
-            }
-            ComputerUtil.handlePlayingSpellAbility(player, sa, null);
+            return true;
         }
+        // If this is an X-cost spell and X isn't set yet, ask the LLM.
+        if (sa.isSpell() && sa.costHasManaX() && sa.getXManaCostPaid() == null) {
+            int min = 0;
+            int max = ComputerUtilMana.determineLeftoverMana(sa, player, false);
+            if (max > min) {
+                Integer chosenX = announceRequirements(sa, min, max, "X");
+                if (chosenX != null) {
+                    sa.setSVar("PayX", chosenX.toString());
+                    sa.setXManaCostPaid(chosenX);
+                }
+            }
+        }
+
+        if (sa.usesTargeting() && (sa.getTargets() == null || sa.getTargets().isEmpty())) {
+            if (!chooseTargetsFor(sa)) {
+                return false;
+            }
+        }
+        SpellAbility sub = sa.getSubAbility();
+        while (sub != null) {
+            if (sub.usesTargeting() && (sub.getTargets() == null || sub.getTargets().isEmpty())) {
+                chooseTargetsFor(sub);
+            }
+            sub = sub.getSubAbility();
+        }
+        ComputerUtil.handlePlayingSpellAbility(player, sa, null);
         return true;
     }
 
@@ -2087,6 +2152,10 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 return super.orderMoveToZoneList(cards, destinationZone, source);
             }
 
+            if (destinationZone == ZoneType.Graveyard || destinationZone == ZoneType.Exile) {
+                return cards;
+            }
+
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             for (Card c : cards) {
@@ -2139,7 +2208,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         try {
             String typesDesc = String.join(" or ", uTypes);
 
-            // Find cards matching the type
+            // Bucket the hand
             List<Card> cardsOfType = new ArrayList<>();
             for (Card c : hand) {
                 for (String type : uTypes) {
@@ -2152,61 +2221,88 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String gameState = serializeGameState();
 
-            if (!cardsOfType.isEmpty()) {
-                // We have a matching type - choose which one to discard (just 1)
-                List<String> options = new ArrayList<>();
-                for (Card c : cardsOfType) {
-                    options.add(c.getName() + " " + c.getManaCost());
-                }
-
-                String context = "You may discard a " + typesDesc + " card (just 1) instead of discarding "
-                        + num + " cards. Choose which " + typesDesc + " to discard - pick your least valuable.";
-
-                int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
-
-                if (choice >= 0 && choice < cardsOfType.size()) {
-                    return new CardCollection(cardsOfType.get(choice));
-                }
-                return new CardCollection(cardsOfType.get(0));
-            } else {
-                // No matching type - must discard N cards
+            // ---- Path A: no card of the required type — must discard N ----
+            if (cardsOfType.isEmpty()) {
                 List<String> options = new ArrayList<>();
                 for (Card c : hand) {
-                    if (c.isLand()) {
-                        options.add(c.getName());
-                    } else {
-                        options.add(c.getName() + " " + c.getManaCost() + " - " + c.getOracleText());
-                    }
+                    options.add(c.isLand()
+                            ? c.getName()
+                            : c.getName() + " " + c.getManaCost() + " - " + c.getOracleText());
                 }
-
-                String context = "No " + typesDesc + " in hand. You must discard " + num
+                String ctx = "No " + typesDesc + " in hand. You must discard " + num
                         + " card(s). Choose your worst cards.";
-
                 List<Integer> chosen = agent.chooseSubset(
-                        gameState + "\nCONTEXT: " + context, options,
+                        gameState + "\nCONTEXT: " + ctx, options,
                         "Choose " + num + " card(s) to discard.");
 
-                CardCollection result = new CardCollection();
-                for (int idx : chosen) {
-                    if (idx >= 0 && idx < hand.size() && result.size() < num) {
-                        result.add(hand.get(idx));
-                    }
-                }
-
-                while (result.size() < num && result.size() < hand.size()) {
-                    for (Card c : hand) {
-                        if (!result.contains(c)) {
-                            result.add(c);
-                            break;
-                        }
-                    }
-                }
-
-                return result;
+                return buildDiscardResult(chosen, hand, num);
             }
+
+            // ---- Path B: choice between discarding 1 type-match OR N others ----
+            // Build a unified action list:
+            //   0..K-1  -> discard this single type-matching card
+            //   K       -> discard N cards (LLM will be re-prompted for which)
+            List<String> options = new ArrayList<>();
+            for (Card c : cardsOfType) {
+                options.add("Discard 1 " + typesDesc + ": " + c.getName() + " " + c.getManaCost()
+                        + " - " + c.getOracleText());
+            }
+            options.add("Instead discard " + num + " other card(s) (you'll choose which)");
+
+            String ctx = "Choose how to pay: discard ONE " + typesDesc
+                    + " card, OR discard " + num + " cards of any type."
+                    + " Compare the value of your best " + typesDesc
+                    + " against the " + num + " worst cards you'd otherwise have to pitch.";
+
+            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + ctx, options);
+
+            // LLM picked "discard N others"
+            if (choice == cardsOfType.size()) {
+                List<String> discardOptions = new ArrayList<>();
+                for (Card c : hand) {
+                    discardOptions.add(c.isLand()
+                            ? c.getName()
+                            : c.getName() + " " + c.getManaCost() + " - " + c.getOracleText());
+                }
+                String ctx2 = "You chose to discard " + num + " card(s) instead of a "
+                        + typesDesc + ". Pick your worst " + num + " cards.";
+                List<Integer> chosen = agent.chooseSubset(
+                        gameState + "\nCONTEXT: " + ctx2, discardOptions,
+                        "Choose " + num + " card(s) to discard.");
+                return buildDiscardResult(chosen, hand, num);
+            }
+
+            // LLM picked a specific type-matching card
+            if (choice >= 0 && choice < cardsOfType.size()) {
+                return new CardCollection(cardsOfType.get(choice));
+            }
+
+            // Out of range — fall back to discarding the first type-match
+            return new CardCollection(cardsOfType.get(0));
+
         } catch (Exception e) {
             return super.chooseCardsToDiscardUnlessType(num, hand, uTypes, sa);
         }
+    }
+
+    /** Helper: convert a subset of indices into a CardCollection, padding to num. */
+    private CardCollection buildDiscardResult(List<Integer> chosen, CardCollectionView hand, int num) {
+        CardCollection result = new CardCollection();
+        for (int idx : chosen) {
+            if (idx >= 0 && idx < hand.size() && result.size() < num) {
+                result.add(hand.get(idx));
+            }
+        }
+        int safety = hand.size() * 2;
+        while (result.size() < num && result.size() < hand.size() && safety-- > 0) {
+            for (Card c : hand) {
+                if (!result.contains(c)) {
+                    result.add(c);
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
     @Override
@@ -2776,10 +2872,240 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
     }
 
+    // =====================================================================
+// PATCH for PlayerControllerExternal.java
+//
+// Adds:
+//   1. enumerateHybridResolutions(ManaCost) — produces every concrete
+//      monocolored resolution of a cost containing hybrid pips, deduplicated.
+//   2. shardToConcreteAlternatives(ManaCostShard) — per-shard alternative
+//      list (the inner combinatoric step).
+//   3. payManaCost override — consults the LLM when the spell tracks
+//      which colors are spent, then forces the chosen concrete cost.
+//
+// Required imports:
+//   import forge.card.mana.ManaCost;
+//   import forge.card.mana.ManaCostParser;
+//   import forge.card.mana.ManaCostShard;
+//   import forge.card.MagicColor;            // already present
+//   (Cost is already imported. ManaConversionMatrix, ManaCostBeingPaid
+//    are already imported.)
+// =====================================================================
+
+
+    // ---------------- payManaCost override ----------------
     @Override
     public boolean payManaCost(ManaCost toPay, CostPartMana costPartMana, SpellAbility sa,
                                String prompt, ManaConversionMatrix matrix, boolean effect) {
+
+        // Only diverge from the heuristic when (a) the spell cares which colors
+        // were spent, and (b) the cost actually has a hybrid pip to choose between.
+        if (sa != null && sa.tracksManaSpent() && costHasHybrid(toPay)) {
+            try {
+                List<ManaCost> variants = enumerateHybridResolutions(toPay);
+
+                // Keep only resolutions the player can actually afford right now.
+                List<ManaCost> payable = new ArrayList<>();
+                for (ManaCost v : variants) {
+                    try {
+                        ManaCostBeingPaid probe = new ManaCostBeingPaid(v);
+                        boolean ok = ComputerUtilMana.canPayManaCost(probe, sa, player, effect);
+                        if (ok) payable.add(v);
+                    } catch (Exception inner) {
+                        inner.printStackTrace();
+                    }
+                }
+                System.err.println("[ExternalAI payManaCost] payable.size=" + payable.size());
+
+                if (payable.size() > 1) {
+                    String gameState = serializeGameState();
+                    List<String> options = new ArrayList<>();
+                    for (ManaCost v : payable) {
+                        options.add(v.toString());
+                    }
+                    String context = "Casting " + sa.getHostCard().getName()
+                            + " with cost " + toPay
+                            + ". This spell's effect depends on which colors are spent."
+                            + "\nText: " + sa.getHostCard().getOracleText().replace("\\n", " ")
+                            + "\nChoose how the hybrid pips should resolve.";
+                    int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+                    if (choice >= 0 && choice < payable.size()) {
+                        ManaCost chosen = payable.get(choice);
+                        return ComputerUtilMana.payManaCost(
+                                new Cost(chosen, effect), player, sa, effect);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[ExternalAI] payManaCost hybrid override fell back: " + e);
+            }
+        }
+
         return super.payManaCost(toPay, costPartMana, sa, prompt, matrix, effect);
+    }
+
+    /** True iff the cost string contains a "/" — i.e. at least one hybrid shard. */
+    private static boolean costHasHybrid(ManaCost cost) {
+        if (cost == null) return false;
+        for (ManaCostShard s : cost) {
+            if (s.isOr2Generic() || s.isPhyrexian()) {
+                return true;
+            }
+            // Monochrome shards have exactly one bit set in the color mask;
+            // hybrids have two.
+            byte mask = s.getColorMask();
+            if (mask != 0 && Integer.bitCount(mask) >= 2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    private static List<ManaCost> enumerateHybridResolutions(ManaCost cost) {
+        List<ManaCost> result = new ArrayList<>();
+        if (cost == null) return result;
+
+        // Per-shard list of textual alternatives (e.g. {U/B} -> ["U", "B"]).
+        // Each inner list has at least one entry.
+        List<List<String>> perShard = new ArrayList<>();
+        for (ManaCostShard s : cost) {
+            List<String> alts = shardToConcreteAlternatives(s);
+            if (alts.isEmpty()) {
+                // Unknown shard type — keep its raw form, no expansion.
+                alts = List.of(s.toString().replace("{", "").replace("}", ""));
+            }
+            perShard.add(alts);
+        }
+
+        // Cartesian product. Bail out if it would explode.
+        long total = 1;
+        for (List<String> alts : perShard) {
+            total *= alts.size();
+            if (total > 64) return result;  // caller falls back
+        }
+
+        int n = perShard.size();
+        int[] idx = new int[n];
+        Set<String> seenCanonical = new HashSet<>();
+
+        while (true) {
+            // Build the cost string for this combination
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                if (i > 0) sb.append(" ");
+                sb.append(perShard.get(i).get(idx[i]));
+            }
+            String raw = sb.toString();
+
+            // Canonicalize: sort the colored pips so UB and BU collapse.
+            // Generic numbers and X are kept positionally at the start.
+            String canonical = canonicalizeCostString(raw);
+
+            System.err.println("[ExternalAI enum] raw='" + raw + "' canonical='" + canonical + "'");
+
+
+            if (seenCanonical.add(canonical)) {
+                try {
+                    result.add(new ManaCost(new ManaCostParser(canonical)));
+                } catch (Exception ignored) {
+                    // skip unparseable
+                }
+            }
+
+            // Increment counter (least significant digit first)
+            int k = n - 1;
+            while (k >= 0) {
+                idx[k]++;
+                if (idx[k] < perShard.get(k).size()) break;
+                idx[k] = 0;
+                k--;
+            }
+            if (k < 0) break;
+        }
+
+        return result;
+    }
+
+    private static List<String> shardToConcreteAlternatives(ManaCostShard s) {
+        List<String> alts = new ArrayList<>();
+        if (s == null) return alts;
+
+        String raw = s.toString();  // e.g. "{U}", "{U/B}", "{2/U}", "{X}"
+        String inner = raw.startsWith("{") && raw.endsWith("}")
+                ? raw.substring(1, raw.length() - 1)
+                : raw;
+
+        // X, Y, Z and other variable cost letters: keep as-is
+        if (inner.equals("X") || inner.equals("Y") || inner.equals("Z")) {
+            alts.add(inner);
+            return alts;
+        }
+
+        // Generic numeric: keep as-is (we don't enumerate within generic mana)
+        if (inner.matches("\\d+")) {
+            alts.add(inner);
+            return alts;
+        }
+
+        // Phyrexian {U/P}: treat as the color side (don't enumerate life payment here)
+        if (s.isPhyrexian()) {
+            // Extract the color from before the slash
+            String colorPart = inner.split("/")[0];
+            alts.add(colorPart);
+            return alts;
+        }
+
+        // {2/Color} hybrid: two alternatives - "2" or the colored pip
+        if (s.isOr2Generic()) {
+            String[] parts = inner.split("/");
+            if (parts.length == 2) {
+                alts.add(parts[0]);   // "2"
+                alts.add(parts[1]);   // color
+                return alts;
+            }
+        }
+
+        // Two-color hybrid {U/B}: split on slash
+        if (inner.contains("/")) {
+            for (String part : inner.split("/")) {
+                alts.add(part);
+            }
+            return alts;
+        }
+
+        // Plain monochrome {U}/{B}/{C}/etc.
+        alts.add(inner);
+        return alts;
+    }
+
+    private static String canonicalizeCostString(String raw) {
+        int genericTotal = 0;
+        List<String> variables = new ArrayList<>();
+        List<String> colors = new ArrayList<>();
+
+        for (String token : raw.split(" ")) {
+            if (token.isEmpty()) continue;
+            if (token.matches("\\d+")) {
+                try { genericTotal += Integer.parseInt(token); } catch (NumberFormatException ignored) {}
+            } else if (token.equals("X") || token.equals("Y") || token.equals("Z")) {
+                variables.add(token);
+            } else {
+                colors.add(token);
+            }
+        }
+
+        colors.sort(Comparator.comparingInt(s -> {
+            if (s.isEmpty()) return 99;
+            int idx = "WUBRGC".indexOf(s.charAt(0));
+            return idx < 0 ? 99 : idx;
+        }));
+
+        List<String> tokens = new ArrayList<>();
+        if (genericTotal > 0) tokens.add(String.valueOf(genericTotal));
+        tokens.addAll(variables);
+        tokens.addAll(colors);
+
+        return tokens.isEmpty() ? "0" : String.join(" ", tokens);
     }
 
     @Override
