@@ -194,14 +194,14 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
         }
 
-        if (ph != null) {
-            if ((ph != PhaseType.MAIN1) && (ph != PhaseType.MAIN2)) {
-                sb.append("PRIORITY NOTE: You have priority at instant speed. ")
-                    .append("Passing is normal here unless you have a beneficial ")
-                    .append("instant-speed play (e.g. combat trick, removal, counterspell, ")
-                    .append("or activated ability).\n");
-        }
-        }
+        boolean isYourMainPhase = (ph == PhaseType.MAIN1 || ph == PhaseType.MAIN2)
+                && getGame().getPhaseHandler().getPlayerTurn() == player;
+            if (!isYourMainPhase) {
+                    sb.append("PRIORITY NOTE: You have priority at instant speed. ")
+                        .append("Passing is normal here unless you have a beneficial ")
+                        .append("instant-speed play (e.g. combat trick, removal, counterspell, ")
+                        .append("or activated ability).\n");
+            }
 
         return sb.toString();
     }
@@ -364,7 +364,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
         if (sa.isAbility()) {
             prefix = "Activate ability ";
-            desc = sa.getDescription().replace("\\n", " ");
+            desc = sa.getDescription().replace("\\n", " ") +
+            " - " + sa.getHostCard().getOracleText();
         } else if (sa.isSpell()) {
             prefix = "Cast ";
             if (saState != null) {
@@ -463,6 +464,30 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                         if (sa.canTarget(si.getSpellAbility())) { anyStackTarget = true; break; }
                     }
                     if (!anyCardTarget && !anyPlayerTarget && !anyStackTarget) continue;
+                } else if (sa.getApi() == ApiType.Charm) {
+                    // Modal Charm: check whether ANY mode has a legal target.
+                    boolean anyModeTargetable = false;
+                    List<AbilitySub> charmChoices = CharmEffect.makePossibleOptions(sa);
+                    for (AbilitySub mode : charmChoices) {
+                        if (!mode.usesTargeting()) {
+                            // Mode doesn't require targets — always playable.
+                            anyModeTargetable = true;
+                            break;
+                        }
+                        if (!CardUtil.getValidCardsToTarget(mode).isEmpty()) {
+                            anyModeTargetable = true;
+                            break;
+                        }
+                        for (Player p : getGame().getPlayers()) {
+                            if (mode.canTarget(p)) { anyModeTargetable = true; break; }
+                        }
+                        if (anyModeTargetable) break;
+                        for (SpellAbilityStackInstance si : getGame().getStack()) {
+                            if (mode.canTarget(si.getSpellAbility())) { anyModeTargetable = true; break; }
+                        }
+                        if (anyModeTargetable) break;
+                    }
+                    if (!anyModeTargetable) continue;
                 }
 
                 // Base (unkicked) action
@@ -1017,6 +1042,16 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public List<AbilitySub> chooseModeForAbility(SpellAbility sa, List<AbilitySub> possible,
                                                  int min, int num, boolean allowRepeat) {
+        System.err.println("[chooseModeForAbility] sa=" + sa.getHostCard().getName()
+                + " saId=" + System.identityHashCode(sa)
+                + " forgeId=" + sa.getId()
+                + " possibleModes=" + possible.size());
+        for (int i = 0; i < possible.size(); i++) {
+            System.err.println("  mode[" + i + "] id=" + System.identityHashCode(possible.get(i))
+                    + " desc=" + possible.get(i).getDescription());
+        }
+        new Throwable("trace").printStackTrace(System.err);
+
         try {
 
             List<AbilitySub> affordable = new ArrayList<>();
@@ -1028,44 +1063,46 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             List<AbilitySub> pool = (affordable.size() >= min) ? affordable : possible;
 
+            List<AbilitySub> result;
             if (pool.size() <= min) {
-                return new ArrayList<>(pool);
-            }
+                result = new ArrayList<>(pool);
+            } else {
 
-            String gameState = serializeGameState();
-            List<String> options = new ArrayList<>();
-            for (AbilitySub mode : pool) {
-                String desc = mode.getDescription();
-                if (desc == null || desc.isEmpty()) desc = mode.toString();
+                String gameState = serializeGameState();
+                List<String> options = new ArrayList<>();
+                for (AbilitySub mode : pool) {
+                    String desc = mode.getDescription();
+                    if (desc == null || desc.isEmpty()) desc = mode.toString();
 
-                String modeCostStr = mode.getParam("ModeCost");
-                if (modeCostStr != null && !modeCostStr.isEmpty()) {
-                    desc = "[+{" + modeCostStr + "}] " + desc;
-                } else if (mode.getPayCosts() != null && !mode.getPayCosts().toString().isEmpty()) {
-                    desc = "[+" + mode.getPayCosts() + "] " + desc;
+                    String modeCostStr = mode.getParam("ModeCost");
+                    if (modeCostStr != null && !modeCostStr.isEmpty()) {
+                        desc = "[+{" + modeCostStr + "}] " + desc;
+                    } else if (mode.getPayCosts() != null && !mode.getPayCosts().toString().isEmpty()) {
+                        desc = "[+" + mode.getPayCosts() + "] " + desc;
+                    }
+                    options.add(desc);
                 }
-                options.add(desc);
-            }
 
-            String context = "Choose " + min + " to " + num + " modes for "
-                    + sa.getHostCard().getName() + "."
-                    + (allowRepeat ? " You may choose the same mode more than once." : "");
+                String context = "Choose " + min + " to " + num + " modes for "
+                        + sa.getHostCard().getName() + "."
+                        + (allowRepeat ? " You may choose the same mode more than once." : "");
 
-            List<Integer> chosen = agent.chooseSubset(gameState, options, context);
+                List<Integer> chosen = agent.chooseSubset(gameState, options, context);
 
-            List<AbilitySub> result = new ArrayList<>();
-            for (int idx : chosen) {
-                if (idx >= 0 && idx < pool.size() && result.size() < num) {
-                    if (allowRepeat || !result.contains(pool.get(idx))) {
-                        result.add(pool.get(idx));
+                result = new ArrayList<>();
+                for (int idx : chosen) {
+                    if (idx >= 0 && idx < pool.size() && result.size() < num) {
+                        if (allowRepeat || !result.contains(pool.get(idx))) {
+                            result.add(pool.get(idx));
+                        }
                     }
                 }
-            }
 
-            if (result.size() < min) {
-                for (AbilitySub mode : pool) {
-                    if (!result.contains(mode) && result.size() < min) {
-                        result.add(mode);
+                if (result.size() < min) {
+                    for (AbilitySub mode : pool) {
+                        if (!result.contains(mode) && result.size() < min) {
+                            result.add(mode);
+                        }
                     }
                 }
             }
@@ -1073,14 +1110,14 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             // Set up targets for each chosen mode
             for (AbilitySub mode : result) {
                 if (mode.usesTargeting()) {
-                    mode.resetTargets();
+                    mode.clearTargets();
                     chooseTargetsFor(mode);
                 }
                 // Also handle sub-abilities of each mode
                 SpellAbility sub = mode.getSubAbility();
                 while (sub != null) {
                     if (sub.usesTargeting()) {
-                        sub.resetTargets();
+                        sub.clearTargets();
                         chooseTargetsFor(sub);
                     }
                     sub = sub.getSubAbility();
@@ -1561,6 +1598,14 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
+
+        System.err.println("[chooseTargetsFor] sa=" + currentAbility.getHostCard().getName()
+                + " saId=" + System.identityHashCode(currentAbility)
+                + " forgeId=" + System.identityHashCode(currentAbility.getId())
+                + " hasTargetRestrictions=" + (currentAbility.getTargetRestrictions() != null)
+                + " desc=" + currentAbility.getDescription());
+        new Throwable("trace").printStackTrace(System.err);
+
         try {
 
             TargetRestrictions tgt = currentAbility.getTargetRestrictions();
@@ -1574,9 +1619,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 return true;
             }
 
-            // IMPORTANT: clearTargets() (not resetTargets() / getTargets().clear())
-            // is what re-initializes dividedValue for DividedAsYouChoose abilities.
-            // See SpellAbility.clearTargets() in the engine.
             currentAbility.clearTargets();
 
             CardCollectionView validCards = CardUtil.getValidCardsToTarget(currentAbility);
@@ -2439,13 +2481,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public void playSpellAbilityNoStack(SpellAbility effectSA, boolean canSetupTargets) {
         if (canSetupTargets) {
             if (effectSA.usesTargeting()) {
-                effectSA.resetTargets();
+                effectSA.clearTargets();
                 chooseTargetsFor(effectSA);
             }
             SpellAbility sub = effectSA.getSubAbility();
             while (sub != null) {
                 if (sub.usesTargeting()) {
-                    sub.resetTargets();
+                    sub.clearTargets();
                     chooseTargetsFor(sub);
                 }
                 sub = sub.getSubAbility();
@@ -2516,7 +2558,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     private boolean prepareTriggerSa(Card host, SpellAbility sa, boolean isMandatory) {
-        // Charm: route through your LLM-aware chooseModeForAbility
         if (sa.getApi() == ApiType.Charm) {
             if (!CharmEffect.makeChoices(sa)) {
                 return false;
@@ -2559,6 +2600,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
         SpellAbility sa = wrapperAbility.getWrappedAbility();
 
+        // For optional triggers, ask LLM first whether to use it at all
+        if (!isMandatory) {
+            if (!confirmTrigger(wrapperAbility)) return false;
+        }
+
+
         // Handle Charm
         if (sa.getApi() == ApiType.Charm) {
             if (!CharmEffect.makeChoices(sa)) {
@@ -2576,21 +2623,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             sa.setTargetingPlayer(targetingPlayer);
             targetingPlayer.getController().chooseTargetsFor(sa);
             return ComputerUtil.playNoStack(wrapperAbility.getActivatingPlayer(), wrapperAbility, getGame(), true);
-        }
-
-        // For optional triggers, ask LLM first whether to use it at all
-        if (!isMandatory) {
-            try {
-                String gameState = serializeGameState();
-                String question = "Use triggered ability from " + host.getName()
-                        + "?\nAbility: " + sa.getDescription()
-                        + "\nCard: " + host.getOracleText();
-                if (!agent.chooseYesNo(gameState, question)) {
-                    return false;  // LLM says no, skip this trigger
-                }
-            } catch (Exception e) {
-                return super.playTrigger(host, wrapperAbility, isMandatory);
-            }
         }
 
         // Now set up targets via LLM (chooseTargetsFor routes to your LLM override)
