@@ -15,6 +15,7 @@ import forge.card.mana.ManaCostShard;
 import forge.deck.Deck;
 import forge.deck.DeckSection;
 import forge.game.*;
+import forge.game.ability.AbilityKey;
 import forge.game.ability.AbilityUtils;
 import forge.game.ability.ApiType;
 import forge.game.ability.effects.CharmEffect;
@@ -32,6 +33,7 @@ import forge.game.player.*;
 import forge.game.replacement.ReplacementEffect;
 import forge.game.spellability.*;
 import forge.game.staticability.StaticAbility;
+import forge.game.trigger.TriggerType;
 import forge.game.trigger.WrappedAbility;
 import forge.game.zone.PlayerZone;
 import forge.game.zone.ZoneType;
@@ -449,7 +451,14 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
                 if (!sa.canPlay(false)) continue;          // false: don't probe optional costs here
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
-                if (sa.usesTargeting() && !ComputerUtilAbility.isFullyTargetable(sa)) continue;
+                if (sa.usesTargeting()) {
+                    boolean anyCardTarget = !CardUtil.getValidCardsToTarget(sa).isEmpty();
+                    boolean anyPlayerTarget = false;
+                    for (Player p : getGame().getPlayers()) {
+                        if (sa.canTarget(p)) { anyPlayerTarget = true; break; }
+                    }
+                    if (!anyCardTarget && !anyPlayerTarget) continue;
+                }
 
                 // Base (unkicked) action
                 actions.add(saToString(sa));
@@ -1392,11 +1401,11 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
         }
 
-        if (sa.usesTargeting() && (sa.getTargets() == null || sa.getTargets().isEmpty())) {
-            if (!chooseTargetsFor(sa)) {
-                return false;
-            }
+        if (sa.usesTargeting()) {
+            sa.clearTargets();  // wipe any heuristic-set targets from candidate enumeration
+            if (!chooseTargetsFor(sa)) return false;
         }
+
         SpellAbility sub = sa.getSubAbility();
         while (sub != null) {
             if (sub.usesTargeting() && (sub.getTargets() == null || sub.getTargets().isEmpty())) {
@@ -1528,12 +1537,36 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return super.chooseNewTargetsFor(ability, filter, optional);
     }
 
+    private void fireBecomesTargetTriggers(SpellAbility sa) {
+        if (sa == null || sa.getTargets() == null || sa.getTargets().isEmpty()) return;
+        for (GameObject tgt : sa.getTargets()) {
+            Map<AbilityKey, Object> runParams = AbilityKey.newMap();
+            runParams.put(AbilityKey.SourceSA, sa);
+            runParams.put(AbilityKey.Target, tgt);
+            getGame().getTriggerHandler().runTrigger(
+                    TriggerType.BecomesTarget, runParams, false);
+        }
+        // Also fire the "becomes target once" trigger (different event in Forge)
+        Map<AbilityKey, Object> onceParams = AbilityKey.newMap();
+        onceParams.put(AbilityKey.SourceSA, sa);
+        onceParams.put(AbilityKey.Targets, sa.getTargets());
+        getGame().getTriggerHandler().runTrigger(
+                TriggerType.BecomesTargetOnce, onceParams, false);
+    }
+
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
         try {
+
             TargetRestrictions tgt = currentAbility.getTargetRestrictions();
             if (tgt == null) {
                 return super.chooseTargetsFor(currentAbility);
+            }
+
+            if (currentAbility.getTargets() != null
+                    && !currentAbility.getTargets().isEmpty()
+                    && currentAbility.isTargetNumberValid()) {
+                return true;
             }
 
             // IMPORTANT: clearTargets() (not resetTargets() / getTargets().clear())
@@ -1649,6 +1682,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     }
                 }
             }
+
+            fireBecomesTargetTriggers(currentAbility);
 
             return true;
         } catch (Exception e) {
@@ -2381,20 +2416,20 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public void playSpellAbilityNoStack(SpellAbility effectSA, boolean canSetupTargets) {
-        if (effectSA.usesTargeting()) {
-            effectSA.resetTargets();
-            chooseTargetsFor(effectSA);
-        }
-
-        SpellAbility sub = effectSA.getSubAbility();
-        while (sub != null) {
-            if (sub.usesTargeting()) {
-                sub.resetTargets();
-                chooseTargetsFor(sub);
+        if (canSetupTargets) {
+            if (effectSA.usesTargeting()) {
+                effectSA.resetTargets();
+                chooseTargetsFor(effectSA);
             }
-            sub = sub.getSubAbility();
+            SpellAbility sub = effectSA.getSubAbility();
+            while (sub != null) {
+                if (sub.usesTargeting()) {
+                    sub.resetTargets();
+                    chooseTargetsFor(sub);
+                }
+                sub = sub.getSubAbility();
+            }
         }
-
         super.playSpellAbilityNoStack(effectSA, canSetupTargets);
     }
 
@@ -2445,7 +2480,57 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public void orderAndPlaySimultaneousSa(List<SpellAbility> activePlayerSAs) {
-        super.orderAndPlaySimultaneousSa(activePlayerSAs);
+        for (final SpellAbility sa : orderSimultaneousSa(activePlayerSAs)) {
+            if (sa.isTrigger() && !sa.isCopied()) {
+                // Replicate prepareSingleSa, but without brains.doTrigger
+                if (prepareTriggerSa(sa.getHostCard(), sa, true)) {
+                    ComputerUtil.playStack(sa, player, getGame());
+                }
+            } else {
+                // Copied-spell branch: defer to parent (no LLM routing here)
+                // by handing it back through a single-element list.
+                super.orderAndPlaySimultaneousSa(java.util.List.of(sa));
+            }
+        }
+    }
+
+    private boolean prepareTriggerSa(Card host, SpellAbility sa, boolean isMandatory) {
+        // Charm: route through your LLM-aware chooseModeForAbility
+        if (sa.getApi() == ApiType.Charm) {
+            if (!CharmEffect.makeChoices(sa)) {
+                return false;
+            }
+            if (!sa.hasParam("Random")) {
+                return true;
+            }
+            sa = sa.getSubAbility();
+        }
+
+        // TargetingPlayer: same as parent — let the targeted player's controller pick
+        if (sa.hasParam("TargetingPlayer")) {
+            Player targetingPlayer = AbilityUtils.getDefinedPlayers(
+                    host, sa.getParam("TargetingPlayer"), sa).get(0);
+            sa.setTargetingPlayer(targetingPlayer);
+            return targetingPlayer.getController().chooseTargetsFor(sa);
+        }
+
+        // The key change: route target selection through chooseTargetsFor (LLM-routed)
+        // instead of brains.doTrigger (which picks targets via heuristic).
+        if (sa.usesTargeting()) {
+            sa.clearTargets();
+            if (!chooseTargetsFor(sa)) {
+                return false;
+            }
+        }
+        SpellAbility sub = sa.getSubAbility();
+        while (sub != null) {
+            if (sub.usesTargeting()) {
+                sub.clearTargets();
+                chooseTargetsFor(sub);
+            }
+            sub = sub.getSubAbility();
+        }
+        return true;
     }
 
     @Override
@@ -2488,10 +2573,10 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
 
         // Now set up targets via LLM (chooseTargetsFor routes to your LLM override)
-        if (sa.usesTargeting()) {
+        if (sa.usesTargeting()
+                && (sa.getTargets() == null || sa.getTargets().isEmpty() || !sa.isTargetNumberValid())) {
             if (!chooseTargetsFor(sa)) {
                 if (isMandatory) {
-                    // LLM couldn't find targets, fall back to heuristic
                     return super.playTrigger(host, wrapperAbility, true);
                 }
                 return false;
@@ -2501,8 +2586,11 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         // Handle sub-abilities that need targets
         SpellAbility sub = sa.getSubAbility();
         while (sub != null) {
-            if (sub.usesTargeting()) {
-                chooseTargetsFor(sub);
+            if (sub.usesTargeting()
+            && (sub.getTargets() == null || sub.getTargets().isEmpty() || !sub.isTargetNumberValid())) {
+                if (!chooseTargetsFor(sub)) {
+                    super.chooseTargetsFor(sub);
+                }
             }
             sub = sub.getSubAbility();
         }
