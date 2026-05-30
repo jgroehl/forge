@@ -427,7 +427,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     actionSources.add(land);
                 }
             }
-
+            spellAbilities:
             for (SpellAbility sa : spellAbilities) {
                 sa.setActivatingPlayer(player);
 
@@ -464,6 +464,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                         if (sa.canTarget(si.getSpellAbility())) { anyStackTarget = true; break; }
                     }
                     if (!anyCardTarget && !anyPlayerTarget && !anyStackTarget) continue;
+
                 } else if (sa.getApi() == ApiType.Charm) {
                     // Modal Charm: check whether ANY mode has a legal target.
                     boolean anyModeTargetable = false;
@@ -488,6 +489,25 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                         if (anyModeTargetable) break;
                     }
                     if (!anyModeTargetable) continue;
+                }
+
+                // Check sub-abilities also have legal targets
+
+                for (SpellAbility sub = sa.getSubAbility(); sub != null; sub = sub.getSubAbility()) {
+                    if (sub.usesTargeting()) {
+                        int minTargets = sub.getTargetRestrictions().getMinTargets(sub.getHostCard(), sub);
+                        if (minTargets == 0) continue;
+                        boolean anyCardTarget = !CardUtil.getValidCardsToTarget(sub).isEmpty();
+                        boolean anyPlayerTarget = false;
+                        for (Player p : getGame().getPlayers()) {
+                            if (sub.canTarget(p)) { anyPlayerTarget = true; break; }
+                        }
+                        boolean anyStackTarget = false;
+                        for (SpellAbilityStackInstance si : getGame().getStack()) {
+                            if (sub.canTarget(si.getSpellAbility())) { anyStackTarget = true; break; }
+                        }
+                        if (!anyCardTarget && !anyPlayerTarget && !anyStackTarget) { continue spellAbilities; }
+                    }
                 }
 
                 // Base (unkicked) action
@@ -544,7 +564,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return null;
         } catch (Exception e) {
             System.err.println("[ExternalAI] chooseSpellAbilityToPlay failed, falling back: " + e);
-            e.printStackTrace();
             return super.chooseSpellAbilityToPlay();
         }
     }
@@ -780,6 +799,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public CardCollectionView chooseCardsForEffect(CardCollectionView sourceList,
                                                    SpellAbility sa, String title, int min, int max, boolean isOptional,
                                                    Map<String, Object> params) {
+
         try {
             if (sourceList.size() <= min && !isOptional) {
                 return sourceList;
@@ -861,6 +881,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     public CardCollection chooseCardsToDiscardFrom(Player playerDiscard, SpellAbility sa,
                                                    CardCollection validCards, int min, int max,
                                                    CardCollectionView visibleToChooser) {
+
         try {
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
@@ -908,7 +929,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return agent.chooseYesNo(gameState, question);
         } catch (Exception e) {
             System.err.println("[ExternalAI] confirmAction FELL BACK: " + e);
-            e.printStackTrace();
             return super.confirmAction(sa, mode, message, options, cardToShow, params);
         }
     }
@@ -1436,7 +1456,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
         if (sa.usesTargeting()) {
             sa.clearTargets();  // wipe any heuristic-set targets from candidate enumeration
-            if (!chooseTargetsFor(sa)) return false;
+            if (!chooseTargetsFor(sa)) return super.playChosenSpellAbility(sa);
         }
 
         SpellAbility sub = sa.getSubAbility();
@@ -3321,6 +3341,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             return result;
         } catch (Exception e) {
+            System.err.println("[External AI] Falling back to heuristic AI in chooseCardsForCost.");
             return super.chooseCardsForCost(optionList, sa, cpl, amount, isOptional, prompt);
         }
     }
@@ -3355,7 +3376,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
         } catch (Exception e) {
             System.err.println("[ExternalAI] payCostToPreventEffect FELL BACK: " + e);
-            e.printStackTrace();
             return super.payCostToPreventEffect(cost, sa, alreadyPaid, allPayers);
         }
     }
