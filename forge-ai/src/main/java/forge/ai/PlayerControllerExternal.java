@@ -15,7 +15,6 @@ import forge.card.mana.ManaCostShard;
 import forge.deck.Deck;
 import forge.deck.DeckSection;
 import forge.game.*;
-import forge.game.ability.AbilityKey;
 import forge.game.ability.AbilityUtils;
 import forge.game.ability.ApiType;
 import forge.game.ability.effects.CharmEffect;
@@ -33,7 +32,6 @@ import forge.game.player.*;
 import forge.game.replacement.ReplacementEffect;
 import forge.game.spellability.*;
 import forge.game.staticability.StaticAbility;
-import forge.game.trigger.TriggerType;
 import forge.game.trigger.WrappedAbility;
 import forge.game.zone.PlayerZone;
 import forge.game.zone.ZoneType;
@@ -2502,48 +2500,53 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public List<SpellAbility> orderSimultaneousSa(List<SpellAbility> activePlayerSAs) {
-        try {
-            if (activePlayerSAs.size() <= 1) {
-                return activePlayerSAs;
-            }
-
-            String gameState = serializeGameState();
-            List<String> options = new ArrayList<>();
-            for (SpellAbility sa : activePlayerSAs) {
-                String desc = sa.getHostCard().getName();
-                String saDesc = sa.getStackDescription();
-                if (saDesc != null && !saDesc.isEmpty()) {
-                    desc += ": " + saDesc;
-                }
-                options.add(desc);
-            }
-
-            String context = "Multiple abilities are triggering simultaneously."
-                    + "\nOrder them - first in the list resolves LAST (stack order)."
-                    + "\nPut the ability you want to resolve first at the END.";
-
-            List<Integer> ordering = agent.chooseOrdering(
-                    gameState + "\nCONTEXT: " + context, options,
-                    "Order these simultaneous abilities (first = resolves last).");
-
-            List<SpellAbility> result = new ArrayList<>();
-            Set<Integer> used = new HashSet<>();
-            for (int idx : ordering) {
-                if (idx >= 0 && idx < activePlayerSAs.size() && !used.contains(idx)) {
-                    result.add(activePlayerSAs.get(idx));
-                    used.add(idx);
-                }
-            }
-            for (int i = 0; i < activePlayerSAs.size(); i++) {
-                if (!used.contains(i)) {
-                    result.add(activePlayerSAs.get(i));
-                }
-            }
-            return result;
-        } catch (Exception e) {
-            return super.orderSimultaneousSa(activePlayerSAs);
-        }
+        return super.orderSimultaneousSa(activePlayerSAs);
     }
+
+//    @Override
+//    public List<SpellAbility> orderSimultaneousSa(List<SpellAbility> activePlayerSAs) {
+//        try {
+//            if (activePlayerSAs.size() <= 1) {
+//                return activePlayerSAs;
+//            }
+//
+//            String gameState = serializeGameState();
+//            List<String> options = new ArrayList<>();
+//            for (SpellAbility sa : activePlayerSAs) {
+//                String desc = sa.getHostCard().getName();
+//                String saDesc = sa.getStackDescription();
+//                if (saDesc != null && !saDesc.isEmpty()) {
+//                    desc += ": " + saDesc;
+//                }
+//                options.add(desc);
+//            }
+//
+//            String context = "Multiple abilities are triggering simultaneously."
+//                    + "\nOrder them - first in the list resolves LAST (stack order)."
+//                    + "\nPut the ability you want to resolve first at the END.";
+//
+//            List<Integer> ordering = agent.chooseOrdering(
+//                    gameState + "\nCONTEXT: " + context, options,
+//                    "Order these simultaneous abilities (first = resolves last).");
+//
+//            List<SpellAbility> result = new ArrayList<>();
+//            Set<Integer> used = new HashSet<>();
+//            for (int idx : ordering) {
+//                if (idx >= 0 && idx < activePlayerSAs.size() && !used.contains(idx)) {
+//                    result.add(activePlayerSAs.get(idx));
+//                    used.add(idx);
+//                }
+//            }
+//            for (int i = 0; i < activePlayerSAs.size(); i++) {
+//                if (!used.contains(i)) {
+//                    result.add(activePlayerSAs.get(i));
+//                }
+//            }
+//            return result;
+//        } catch (Exception e) {
+//            return super.orderSimultaneousSa(activePlayerSAs);
+//        }
+//    }
 
     @Override
     public void orderAndPlaySimultaneousSa(List<SpellAbility> activePlayerSAs) {

@@ -114,7 +114,17 @@ public class SimulateMatch {
                 if (i > 1) {
                     sb.append(" vs ");
                 }
-                String name = TextUtil.concatNoSpace("Ai(", String.valueOf(i), ")-", d.getName());
+                String name;
+//                if (i == 1 && System.getProperty("forge.external.agent.url") != null) {
+//                    name = TextUtil.concatNoSpace("[LLM]Ai(", String.valueOf(i), ")-", d.getName());
+//                } else {
+//                    name = TextUtil.concatNoSpace("Ai(", String.valueOf(i), ")-", d.getName());
+//                }
+                if (i == 1 && System.getProperty("forge.external.agent.url") != null) {
+                    name = "[LLM]AI";
+                } else {
+                    name = "ForgeAI ";
+                }
                 sb.append(name);
 
                 RegisteredPlayer rp;
