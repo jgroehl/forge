@@ -956,7 +956,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             for (Card c : player.getCardsIn(ZoneType.Hand)) {
                 handDesc.append("\n").append(cardToString(c));
             }
-            handDesc.append("\nCards to return if you mulligan: ");
+            handDesc.append("\nNumber of cards already bottomed: ");
             handDesc.append(cardsToReturn);
             return agent.chooseYesNo(gameState + "\n" + handDesc,
                     "Keep this hand? (YES = keep, NO = mulligan)");
