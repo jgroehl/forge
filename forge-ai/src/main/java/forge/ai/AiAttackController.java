@@ -242,13 +242,7 @@ public class AiAttackController {
         return bestDefender;
     }
 
-    /**
-     * <p>
-     * sortAttackers.
-     * </p>
-     *
-     */
-    public final static List<Card> sortAttackers(final List<Card> in) {
+    public static List<Card> sortAttackers(final List<Card> in) {
         final List<Card> result = new ArrayList<>();
 
         // Cards with triggers should come first (for Battle Cry)
@@ -940,7 +934,12 @@ public class AiAttackController {
                         }
                     }
                     if (mustAttackDef != null) {
-                        combat.addAttacker(attacker, mustAttackDef);
+                        // combat is shared across these parallel futures and its attacker
+                        // multimap is not thread-safe; unsynchronized addAttacker calls
+                        // collide (ConcurrentModificationException, dropped attackers)
+                        synchronized (combat) {
+                            combat.addAttacker(attacker, mustAttackDef);
+                        }
                         attackersLeft.remove(attacker);
                         numForcedAttackers.incrementAndGet();
                     }
