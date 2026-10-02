@@ -39,6 +39,7 @@ import forge.game.zone.ZoneType;
 import forge.item.PaperCard;
 import forge.util.*;
 import forge.util.collect.FCollectionView;
+import com.google.common.collect.Multiset;
 
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
