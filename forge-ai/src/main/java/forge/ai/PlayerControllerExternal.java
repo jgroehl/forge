@@ -3,6 +3,7 @@ package forge.ai;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Multiset;
 
 import forge.LobbyPlayer;
 import forge.card.CardStateName;
@@ -90,10 +91,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         StringBuilder sb = new StringBuilder();
 
         PhaseType ph = getGame().getPhaseHandler().getPhase();
-        sb.append("turn=").append(getGame().getPhaseHandler().getTurn());
-        sb.append(" phase=").append(ph != null ? ph.toString() : "PREGAME");
-        sb.append(" player=").append(playerTag(getGame().getPhaseHandler().getPlayerTurn()));
-        sb.append("\n");
+        Player activePlayer = getGame().getPhaseHandler().getPlayerTurn();
+        sb.append("Turn ").append(getGame().getPhaseHandler().getTurn());
+        sb.append(" | phase: ").append(ph != null ? ph.toString() : "PREGAME");
+        sb.append(" | ").append(activePlayer == null ? "game not started"
+                : activePlayer == player ? "it is YOUR turn" : "it is " + playerTag(activePlayer) + "'s turn");
+        sb.append("\n\n");
 
         int oppCount = 0;
         for (Player p : getGame().getPlayers()) {
@@ -105,12 +108,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             if (isMe) {
                 String manaStr = buildAvailableMana(p);
                 if (!manaStr.isEmpty()) {
-                    sb.append(" | mana=").append(manaStr);
+                    sb.append(" | untapped mana sources: ").append(manaStr);
                 }
             }
             sb.append("\n");
 
-            sb.append(tag).append("_hand: ");
+            sb.append(tag).append("_hand (").append(p.getCardsIn(ZoneType.Hand).size()).append("): ");
             if (isMe) {
                 List<String> handCards = new ArrayList<>();
                 for (Card c : p.getCardsIn(ZoneType.Hand)) {
@@ -120,16 +123,16 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                         handCards.add(c.getName() + " " + c.getManaCost().toString());
                     }
                 }
-                sb.append(String.join(", ", handCards));
+                sb.append(handCards.isEmpty() ? "empty" : String.join(", ", handCards));
             } else {
-                sb.append(p.getCardsIn(ZoneType.Hand).size()).append(" cards");
+                sb.append("hidden");
             }
             sb.append("\n");
 
-            sb.append(tag).append("_deck: ").append(p.getCardsIn(ZoneType.Library).size()).append(" cards");
+            sb.append(tag).append("_library: ").append(p.getCardsIn(ZoneType.Library).size()).append(" cards");
             sb.append("\n");
 
-            sb.append(tag).append("_board: ");
+            sb.append(tag).append("_battlefield: ");
             List<String> boardCards = new ArrayList<>();
             for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
                 boardCards.add(cardToStringCompact(c));
@@ -139,7 +142,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             CardCollectionView grave = p.getCardsIn(ZoneType.Graveyard);
             if (!grave.isEmpty()) {
-                sb.append(tag).append("_grave: ");
+                sb.append(tag).append("_graveyard: ");
                 List<String> graveCards = new ArrayList<>();
                 for (Card c : grave) {
                     graveCards.add(c.getName());
@@ -158,6 +161,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 sb.append(String.join(", ", exileCards));
                 sb.append("\n");
             }
+            sb.append("\n");
         }
 
         Combat combat = getGame().getCombat();
@@ -185,21 +189,22 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
 
         if (!getGame().getStack().isEmpty()) {
-            sb.append("STACK: ");
+            sb.append("STACK (top resolves first):\n");
             for (SpellAbilityStackInstance si : getGame().getStack()) {
-                sb.append(si.getSpellAbility().getHostCard().getName()).append(": ")
+                sb.append("  ").append(si.getSpellAbility().getHostCard().getName())
+                        .append(" (controlled by ").append(playerTag(si.getActivatingPlayer())).append("): ")
                         .append(si.getStackDescription()).append("\n");
             }
         }
 
         boolean isYourMainPhase = (ph == PhaseType.MAIN1 || ph == PhaseType.MAIN2)
                 && getGame().getPhaseHandler().getPlayerTurn() == player;
-            if (!isYourMainPhase) {
-                    sb.append("PRIORITY NOTE: You have priority at instant speed. ")
-                        .append("Passing is normal here unless you have a beneficial ")
-                        .append("instant-speed play (e.g. combat trick, removal, counterspell, ")
-                        .append("or activated ability).\n");
-            }
+        if (!isYourMainPhase) {
+            sb.append("NOTE: This is not your main phase, so only instant-speed plays are possible. ")
+                    .append("Passing is normal here unless you have a worthwhile ")
+                    .append("instant-speed play (e.g. combat trick, removal, counterspell, ")
+                    .append("or activated ability).\n");
+        }
 
         return sb.toString();
     }
@@ -297,28 +302,34 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     private static String cardToStringCompact(Card c) {
         StringBuilder sb = new StringBuilder(c.getName());
         if (c.isCreature()) {
-            sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness()).append(" ");
+            sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness());
         }
         if (c.isTapped()) sb.append(" (tapped)");
         if (c.isSick()) sb.append(" (summoning sick)");
-        Map<CounterType, Integer> counters = c.getCounters();
-        if (!counters.isEmpty()) {
-            sb.append(" [");
-            counters.forEach((type, count) ->
-                    sb.append(type).append("=").append(count).append(","));
-            sb.setLength(sb.length() - 1);
-            sb.append("] ");
-        }
+        appendCounters(sb, c);
 
         List<KeywordInterface> keywords = c.getKeywords();
         if (!keywords.isEmpty()) {
-            sb.append(" [");
+            sb.append(" [keywords: ");
             keywords.forEach((kw) ->
-                    sb.append(kw).append(","));
-            sb.setLength(sb.length() - 1);
-            sb.append("] ");
+                    sb.append(kw).append(", "));
+            sb.setLength(sb.length() - 2);
+            sb.append("]");
         }
         return sb.toString();
+    }
+
+    private static void appendCounters(StringBuilder sb, Card c) {
+        Multiset<CounterType> counters = c.getCounters();
+        if (counters.isEmpty()) {
+            return;
+        }
+        sb.append(" [counters: ");
+        for (Multiset.Entry<CounterType> e : counters.entrySet()) {
+            sb.append(e.getElement()).append("=").append(e.getCount()).append(", ");
+        }
+        sb.setLength(sb.length() - 2);
+        sb.append("]");
     }
 
     private static String cardToString(Card c) {
@@ -332,13 +343,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         if (c.isSick()) {
             sb.append(" (summoning sick)");
         }
-        Map<CounterType, Integer> counters = c.getCounters();
-        if (!counters.isEmpty()) {
-            sb.append(" [");
-            counters.forEach((type, count) -> sb.append(type).append("=").append(count).append(","));
-            sb.setLength(sb.length() - 1);
-            sb.append("] ");
-        }
+        appendCounters(sb, c);
         sb.append(" ").append(c.getOracleText().replace("\\n", " "));
         return sb.toString();
     }
@@ -607,27 +612,29 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String gameState = serializeGameState();
 
-            StringBuilder context = new StringBuilder();
-            context.append("CREATURES:\n");
+            List<String> options = new ArrayList<>();
             for (int i = 0; i < possibleAttackers.size(); i++) {
-                context.append("  C").append(i).append(": ").append(cardToStringCompact(possibleAttackers.get(i))).append("\n");
+                options.add("C" + i + ": " + cardToStringCompact(possibleAttackers.get(i)));
             }
-            context.append("DEFENDERS:\n");
             for (int i = 0; i < defenders.size(); i++) {
                 GameEntity d = defenders.get(i);
                 if (d instanceof Player p) {
-                    String tag = playerTag(p);
-                    context.append("  D").append(i).append(": ").append(tag)
-                            .append(" (").append(p.getLife()).append(" life)\n");
+                    options.add("D" + i + ": " + playerTag(p) + " (" + p.getLife() + " life)");
+                } else if (d instanceof Card c) {
+                    options.add("D" + i + ": " + cardToStringCompact(c) + " (controlled by "
+                            + playerTag(c.getController()) + ")");
                 } else {
-                    context.append("  D").append(i).append(": ").append(d.toString()).append("\n");
+                    options.add("D" + i + ": " + d);
                 }
             }
-            context.append("\nDeclare attackers.");
-            context.append("\nRespond with ONLY NONE or the comma-separated attack assignment pairs." +
-                    "Omit creatures you don't want to attack with. ");
 
-            String response = agent.chooseRaw(gameState + "\n" + context.toString());
+            String prompt = ExternalAgentClient.buildLabeledPrompt(gameState, "ATTACK ASSIGNMENT",
+                    "It is your declare-attackers step. Decide which of your creatures attack and what each one attacks.\n"
+                            + "C# entries are your creatures that can attack; D# entries are the players or permanents they can attack.",
+                    "your attackers C#, defenders D#", options,
+                    "\"action\": comma-separated pairs C#-D#, one per attacking creature, e.g. \"C0-D0,C1-D0\". "
+                            + "Leave out creatures that should not attack. Use \"NONE\" to not attack at all.");
+            String response = agent.chooseRaw(prompt).action();
 
             if (response != null && !response.trim().equalsIgnoreCase("NONE")) {
                 for (String pair : response.split(",")) {
@@ -703,24 +710,29 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String gameState = serializeGameState();
 
-            StringBuilder context = new StringBuilder();
-            context.append("ATTACKERS:\n");
+            List<String> options = new ArrayList<>();
             for (int i = 0; i < attackers.size(); i++) {
                 Card atk = attackers.get(i);
-                String controllerTag = playerTag(atk.getController());
-                context.append("  A").append(i).append(": ").append(cardToStringCompact(atk))
-                        .append(" (controlled by ").append(controllerTag).append(")\n");
+                GameEntity def = combat.getDefenderByAttacker(atk);
+                String target = def instanceof Player p ? playerTag(p)
+                        : def instanceof Card c ? c.getName() + " (" + playerTag(c.getController()) + ")"
+                        : String.valueOf(def);
+                options.add("A" + i + ": " + cardToStringCompact(atk) + " (controlled by "
+                        + playerTag(atk.getController()) + ", attacking " + target + ")");
             }
-
-            context.append("YOUR BLOCKERS:\n");
             for (int i = 0; i < relevantBlockers.size(); i++) {
-                context.append("  B").append(i).append(": ").append(cardToStringCompact(relevantBlockers.get(i))).append("\n");
+                options.add("B" + i + ": " + cardToStringCompact(relevantBlockers.get(i)));
             }
-            context.append("\nAssign blocks.");
-            context.append("\nRespond with ONLY NONE or the comma-separated blocker assignment pairs." +
-                    "Omit creatures you don't want to block with. ");
 
-            String response = agent.chooseRaw(gameState + "\n" + context.toString());
+            String prompt = ExternalAgentClient.buildLabeledPrompt(gameState, "BLOCK ASSIGNMENT",
+                    "Opponent creatures are attacking. Decide which of your untapped creatures block and which attacker each one blocks.\n"
+                            + "A# entries are the attacking creatures; B# entries are your creatures that can block. "
+                            + "Unblocked attackers deal their damage to the player or permanent they are attacking.",
+                    "attackers A#, your blockers B#", options,
+                    "\"action\": comma-separated pairs B#-A#, one per blocking creature, e.g. \"B0-A0,B1-A0\" "
+                            + "(B0 and B1 both block A0). Leave out creatures that should not block. "
+                            + "Use \"NONE\" to not block at all.");
+            String response = agent.chooseRaw(prompt).action();
 
             if (response != null && !response.trim().equalsIgnoreCase("NONE")) {
                 for (String pair : response.split(",")) {
@@ -777,7 +789,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String context = title != null ? title : saToString(sa);
             int offset = isOptional ? 1 : 0;
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, actionList);
+            int choice = agent.chooseAction(gameState, context, actionList);
 
             if (isOptional && choice == 0) {
                 return null;
@@ -812,8 +824,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String context = (title != null ? title : saToString(sa))
                     + " (choose " + min + " to " + max + ")";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + min + " to " + max + " cards.");
 
             CardCollection result = new CardCollection();
@@ -850,8 +861,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + (message != null ? ": " + message : "")
                     + " (min=" + min + ", max=" + max + ")";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose which permanents to sacrifice. Sacrifice your least valuable permanents.");
 
             CardCollection result = new CardCollection();
@@ -889,8 +899,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = "Choose " + min + " to " + max + " cards to discard.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Discard your worst cards. Keep removal, card draw, and key threats.");
 
             CardCollection result = new CardCollection();
@@ -921,10 +930,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         try {
             String gameState = serializeGameState();
             String question = message != null ? message : "Confirm action?";
+            String context = null;
             if (sa != null && sa.getHostCard() != null) {
-                question = sa.getHostCard().getName() + " - " + question;
+                context = "Source: " + sa.getHostCard().getName() + " - "
+                        + sa.getHostCard().getOracleText().replace("\\n", " ");
             }
-            return agent.chooseYesNo(gameState, question);
+            return agent.chooseYesNo(gameState, context, question);
         } catch (Exception e) {
             System.err.println("[ExternalAI] confirmAction FELL BACK: " + e);
             return super.confirmAction(sa, mode, message, options, cardToShow, params);
@@ -938,10 +949,11 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
         try {
             String gameState = serializeGameState();
-            String question = "Use optional trigger: " + wrapper.getWrappedAbility().getOriginalDescription()
-                    + " from " + wrapper.getHostCard().getName() + "? (CONTEXT: " +
-                    wrapper.getHostCard().getOracleText() + ")";
-            return agent.chooseYesNo(gameState, question);
+            Card host = wrapper.getHostCard();
+            String context = "An optional (\"may\") triggered ability of " + host.getName() + " is resolving.\n"
+                    + "Ability: " + wrapper.getWrappedAbility().getOriginalDescription() + "\n"
+                    + "Card text: " + host.getOracleText().replace("\\n", " ");
+            return agent.chooseYesNo(gameState, context, "Do you want to use this ability?");
         } catch (Exception e) {
             return super.confirmTrigger(wrapper);
         }
@@ -952,14 +964,19 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         try {
             String gameState = serializeGameState();
             StringBuilder handDesc = new StringBuilder();
-            handDesc.append("Current cards in Hand:");
+            handDesc.append("Opening hand decision (London mulligan). ")
+                    .append(firstPlayer == player ? "You are on the play (you take the first turn)."
+                            : "You are on the draw (you draw on your first turn).")
+                    .append("\nYour hand:");
             for (Card c : player.getCardsIn(ZoneType.Hand)) {
-                handDesc.append("\n").append(cardToString(c));
+                handDesc.append("\n- ").append(cardToString(c));
             }
-            handDesc.append("\nNumber of cards already bottomed: ");
-            handDesc.append(cardsToReturn);
-            return agent.chooseYesNo(gameState + "\n" + handDesc,
-                    "Keep this hand? (YES = keep, NO = mulligan)");
+            if (cardsToReturn > 0) {
+                handDesc.append("\nIf you keep, you must put ").append(cardsToReturn)
+                        .append(" card(s) from this hand on the bottom of your library.");
+            }
+            return agent.chooseYesNo(gameState, handDesc.toString(),
+                    "Keep this hand? YES = keep it, NO = mulligan (shuffle and draw a new hand).");
         } catch (Exception e) {
             return super.mulliganKeepHand(firstPlayer, cardsToReturn);
         }
@@ -1164,7 +1181,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     // CHOOSE CARDS TO DISCARD TO MAXIMUM HAND SIZE
     // ---------------------------------------------------------------
     @Override
-    public CardCollection chooseCardsToDiscardToMaximumHandSize(int numDiscard) {
+    public CardCollectionView chooseCardsToDiscardToMaximumHandSize(int numDiscard) {
         try {
             String gameState = serializeGameState();
             CardCollectionView hand = player.getCardsIn(ZoneType.Hand);
@@ -1182,8 +1199,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + " Choose the least useful cards to discard."
                     + " Keep your best spells, removal, and cards that fit your game plan.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose exactly " + numDiscard + " card(s) to discard.");
 
             CardCollection result = new CardCollection();
@@ -1236,7 +1252,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += " (for " + sa.getHostCard().getName() + ")";
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < spells.size()) {
                 return spells.get(choice);
@@ -1280,7 +1296,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += "\nFrom effect: " + sa.getDescription();
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < colorBytes.size()) {
                 return colorBytes.get(choice);
@@ -1320,7 +1336,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context = c.getName() + " - " + context;
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < colorBytes.size()) {
                 return colorBytes.get(choice);
@@ -1363,8 +1379,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += "\nFrom effect: " + sa.getDescription();
             }
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, colorOptions,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, colorOptions,
                     "Choose " + min + " to " + max + " colors.");
 
             byte result = 0;
@@ -1420,7 +1435,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += " (triggered by: " + triggerEvent.toString() + ")";
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < abilities.size()) {
                 return abilities.get(choice);
@@ -1527,7 +1542,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             context += "\nRange: " + min + " to " + max;
             context += "\nHigher usually means stronger effect but higher cost.";
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < options.size()) {
                 return Integer.parseInt(options.get(choice));
@@ -1558,8 +1573,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + " (choose " + min + " to " + max + ")"
                     + "\nPrefer destroying opponent's best permanents. Avoid destroying your own.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + min + " to " + max + " permanents to destroy.");
 
             CardCollection result = new CardCollection();
@@ -1692,14 +1706,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             if (maxTargets == 1) {
                 // Single target
-                int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+                int choice = agent.chooseAction(gameState, context, options);
                 if (choice >= 0 && choice < targetObjects.size()) {
                     chosenTargets.add(targetObjects.get(choice));
                 }
             } else {
                 // Multiple targets
-                List<Integer> chosen = agent.chooseSubset(
-                        gameState + "\nCONTEXT: " + context, options,
+                List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                         "Choose " + minTargets + " to " + maxTargets + " targets.");
                 for (int idx : chosen) {
                     if (idx >= 0 && idx < targetObjects.size() && chosenTargets.size() < maxTargets) {
@@ -1786,32 +1799,19 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return result;
         }
 
-        // Build the prompt
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("GAME STATE:\n").append(gameState).append("\n\n");
-        prompt.append("Distribute exactly ").append(total)
-                .append(" among these ").append(n).append(" targets of ")
-                .append(sa.getHostCard().getName()).append(" (")
-                .append(sa.getDescription().replace("\\n", " ")).append(").\n");
-        prompt.append("Each target must receive at least 1. The amounts must sum to exactly ")
-                .append(total).append(".\n\n");
-        prompt.append("TARGETS:\n");
-        for (int i = 0; i < n; i++) {
-            GameObject t = targets.get(i);
-            String desc;
+        List<String> options = new ArrayList<>();
+        for (GameObject t : targets) {
             if (t instanceof Card c) {
-                String owner = c.getController() == player ? "(yours) " : "(opponent's) ";
-                desc = owner + cardToStringCompact(c);
+                String owner = c.getController() == player ? "(yours) " : "(" + playerTag(c.getController()) + "'s) ";
+                options.add(owner + cardToStringCompact(c));
             } else if (t instanceof Player p) {
-                desc = playerTag(p) + " (" + p.getLife() + " life)";
+                options.add(playerTag(p) + " (" + p.getLife() + " life)");
             } else {
-                desc = t.toString();
+                options.add(t.toString());
             }
-            prompt.append(i).append(": ").append(desc).append("\n");
         }
-        prompt.append("\nRespond with ONLY ").append(n)
-                .append(" comma-separated integers in target order, e.g. ");
-        // Show an example: even split
+
+        // Example: even split with remainder on the first targets
         int base = total / n;
         int rem = total - base * n;
         StringBuilder example = new StringBuilder();
@@ -1819,9 +1819,16 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             if (i > 0) example.append(",");
             example.append(base + (i < rem ? 1 : 0));
         }
-        prompt.append(example).append(" (sums to ").append(total).append(").");
 
-        String response = agent.chooseRaw(prompt.toString());
+        String prompt = ExternalAgentClient.buildPrompt(gameState, "DISTRIBUTION",
+                sa.getHostCard().getName() + ": " + sa.getDescription().replace("\\n", " ") + "\n"
+                        + "Divide exactly " + total + " among the " + n + " targets below. "
+                        + "Each target must receive at least 1.",
+                "targets", options,
+                "\"action\": exactly " + n + " comma-separated integers, one per target in the order listed, "
+                        + "each at least 1 and summing to exactly " + total + ", e.g. \"" + example + "\".");
+
+        String response = agent.chooseRaw(prompt).action();
 
         // Parse: extract integers in order
         int[] parsed = new int[n];
@@ -1880,7 +1887,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += " (for " + sa.getHostCard().getName() + ")";
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < allTargets.size()) {
                 return allTargets.get(choice);
@@ -1937,8 +1944,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 return super.chooseCardsForEffectMultiple(validMap, sa, title, isOptional);
             }
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context.toString(), options,
                     "Choose one card from each category if required.");
 
             CardCollection result = new CardCollection();
@@ -1988,8 +1994,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += " for " + sa.getHostCard().getName();
             }
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + min + " to " + max + " targets.");
 
             List<T> result = new ArrayList<>();
@@ -2041,8 +2046,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += " for " + sa.getHostCard().getName();
             }
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose exactly " + num + " spell abilities.");
 
             List<SpellAbility> result = new ArrayList<>();
@@ -2141,8 +2145,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nDamage is assigned in this order - first blocker takes damage first."
                     + "\nPut the creature you most want to kill first.";
 
-            List<Integer> ordering = agent.chooseOrdering(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> ordering = agent.chooseOrdering(gameState, context, options,
                     "Order blockers (first = takes damage first).");
 
             CardCollection result = new CardCollection();
@@ -2194,7 +2197,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nWhere should " + cardToStringCompact(blocker) + " be in the damage order?"
                     + "\nEarlier position = takes damage first.";
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             CardCollection result = new CardCollection(oldBlockers);
             if (choice >= 0 && choice <= result.size()) {
@@ -2225,8 +2228,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nYour blocker assigns damage in this order - first attacker takes damage first."
                     + "\nPut the creature you most want to kill first.";
 
-            List<Integer> ordering = agent.chooseOrdering(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> ordering = agent.chooseOrdering(gameState, context, options,
                     "Order attackers (first = takes damage first).");
 
             CardCollection result = new CardCollection();
@@ -2302,8 +2304,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += "\nFirst in the list = top of graveyard.";
             }
 
-            List<Integer> ordering = agent.chooseOrdering(gameState + "\nCONTEXT: " + context,
-                    options, "Order these cards (first = top).");
+            List<Integer> ordering = agent.chooseOrdering(gameState, context, options, "Order these cards (first = top).");
 
             CardCollection result = new CardCollection();
             Set<Integer> used = new HashSet<>();
@@ -2358,8 +2359,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
                 String ctx = "No " + typesDesc + " in hand. You must discard " + num
                         + " card(s). Choose your worst cards.";
-                List<Integer> chosen = agent.chooseSubset(
-                        gameState + "\nCONTEXT: " + ctx, options,
+                List<Integer> chosen = agent.chooseSubset(gameState, ctx, options,
                         "Choose " + num + " card(s) to discard.");
 
                 return buildDiscardResult(chosen, hand, num);
@@ -2381,7 +2381,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + " Compare the value of your best " + typesDesc
                     + " against the " + num + " worst cards you'd otherwise have to pitch.";
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + ctx, options);
+            int choice = agent.chooseAction(gameState, ctx, options);
 
             // LLM picked "discard N others"
             if (choice == cardsOfType.size()) {
@@ -2393,8 +2393,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
                 String ctx2 = "You chose to discard " + num + " card(s) instead of a "
                         + typesDesc + ". Pick your worst " + num + " cards.";
-                List<Integer> chosen = agent.chooseSubset(
-                        gameState + "\nCONTEXT: " + ctx2, discardOptions,
+                List<Integer> chosen = agent.chooseSubset(gameState, ctx2, discardOptions,
                         "Choose " + num + " card(s) to discard.");
                 return buildDiscardResult(chosen, hand, num);
             }
@@ -2450,8 +2449,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nExile cards you don't need for graveyard synergies (flashback, recursion)."
                     + "\nKeep cards you might want to bring back later.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose up to " + genericAmount + " cards to exile for delve.");
 
             CardCollection result = new CardCollection();
@@ -2748,7 +2746,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String context = sa.getHostCard().getName() + " - " + prompt
                     + (optional ? "\nVoting is optional - you may abstain." : "");
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, optionDescs);
+            int choice = agent.chooseAction(gameState, context, optionDescs);
 
             if (choice >= 0 && choice < options.size()) {
                 return options.get(choice);
@@ -2775,8 +2773,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String context = "Mulligan: put " + cardsToReturn + " card(s) from your hand on the bottom of your library."
                     + "\nKeep your best cards - put back lands if you have too many, or expensive spells you can't cast early.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + cardsToReturn + " card(s) to put back.");
 
             CardCollection result = new CardCollection();
@@ -2852,7 +2849,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context = sa.getHostCard().getName() + " - " + context;
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < faces.size()) {
                 return faces.get(choice);
@@ -2882,7 +2879,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context = sa.getHostCard().getName() + " - " + context;
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < states.size()) {
                 return states.get(choice);
@@ -2916,8 +2913,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\n" + pile1Desc
                     + "\n" + pile2Desc;
 
-            return agent.chooseYesNo(gameState + "\nCONTEXT: " + context,
-                    "Take Pile 1? (YES = Pile 1, NO = Pile 2)");
+            return agent.chooseYesNo(gameState, context, "Take Pile 1? (YES = Pile 1, NO = Pile 2)");
         } catch (Exception e) {
             return super.chooseCardsPile(sa, pile1, pile2, faceUp);
         }
@@ -2942,7 +2938,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context = sa.getHostCard().getName() + " - " + context;
             }
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, optionDescs);
+            int choice = agent.chooseAction(gameState, context, optionDescs);
 
             if (choice >= 0 && choice < options.size()) {
                 return options.get(choice);
@@ -2967,7 +2963,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     " (has: " + tgtCard.getKeywords() + ")"
                     + (prompt != null ? "\n" + prompt : "");
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (choice >= 0 && choice < options.size()) {
                 return options.get(choice);
@@ -3007,7 +3003,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 //
 //            String context = "Chose which replacement effect to apply.";
 //
-//            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+//            int choice = agent.chooseAction(gameState, context, options);
 //            if (choice >= 0 && choice < possibleReplacers.size()) {
 //                return possibleReplacers.get(choice);
 //            }
@@ -3037,7 +3033,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nPick the color or type that blocks the most threats on the board."
                     + "\nProtection prevents damage, blocking, targeting, and enchanting from that source.";
 
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, choices);
+            int choice = agent.chooseAction(gameState, context, choices);
 
             if (choice >= 0 && choice < choices.size()) {
                 return choices.get(choice);
@@ -3104,7 +3100,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                             + ". This spell's effect depends on which colors are spent."
                             + "\nText: " + sa.getHostCard().getOracleText().replace("\\n", " ")
                             + "\nChoose how the hybrid pips should resolve.";
-                    int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+                    int choice = agent.chooseAction(gameState, context, options);
                     if (choice >= 0 && choice < payable.size()) {
                         ManaCost chosen = payable.get(choice);
                         return ComputerUtilMana.payManaCost(
@@ -3316,8 +3312,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             int offset = isOptional ? 1 : 0;
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + amount + " card(s) to pay the cost.");
 
             CardCollection result = new CardCollection();
@@ -3425,7 +3420,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             String context = selectPrompt != null ? selectPrompt : "Search for a card";
             int offset = isOptional ? 1 : 0;
-            int choice = agent.chooseAction(gameState + "\nCONTEXT: " + context, options);
+            int choice = agent.chooseAction(gameState, context, options);
 
             if (isOptional && choice == 0) return null;
 
@@ -3468,8 +3463,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 context += " (from " + sa.getHostCard().getName() + ")";
             }
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + min + " to " + max + " cards.");
 
             List<Card> result = new ArrayList<>();
@@ -3521,8 +3515,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                     + "\nRevealing gives your opponent information - reveal cards they already know about"
                     + " or cards that matter least to keep hidden.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose " + min + " to " + max + " card(s) to reveal.");
 
             CardCollection result = new CardCollection();
@@ -3568,8 +3561,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             String context = "You may activate these abilities from your opening hand before the game starts."
                     + "\nChoose which to activate, or NONE to skip.";
 
-            List<Integer> chosen = agent.chooseSubset(
-                    gameState + "\nCONTEXT: " + context, options,
+            List<Integer> chosen = agent.chooseSubset(gameState, context, options,
                     "Choose abilities to activate from opening hand, or NONE.");
 
             List<SpellAbility> result = new ArrayList<>();
