@@ -38,6 +38,7 @@ import forge.game.zone.ZoneType;
 import forge.item.PaperCard;
 import forge.util.*;
 import forge.util.collect.FCollectionView;
+import com.google.common.collect.Multiset;
 
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
@@ -301,11 +302,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
         if (c.isTapped()) sb.append(" (tapped)");
         if (c.isSick()) sb.append(" (summoning sick)");
-        Map<CounterType, Integer> counters = c.getCounters();
+        Multiset<CounterType> counters = c.getCounters();
         if (!counters.isEmpty()) {
             sb.append(" [");
-            counters.forEach((type, count) ->
-                    sb.append(type).append("=").append(count).append(","));
+            for (Multiset.Entry<CounterType> entry : counters.entrySet()) {
+                sb.append(entry.getElement()).append("=").append(entry.getCount()).append(",");
+            }
             sb.setLength(sb.length() - 1);
             sb.append("] ");
         }
@@ -332,10 +334,12 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         if (c.isSick()) {
             sb.append(" (summoning sick)");
         }
-        Map<CounterType, Integer> counters = c.getCounters();
+        Multiset<CounterType> counters = c.getCounters();
         if (!counters.isEmpty()) {
             sb.append(" [");
-            counters.forEach((type, count) -> sb.append(type).append("=").append(count).append(","));
+            for (Multiset.Entry<CounterType> entry : counters.entrySet()) {
+                sb.append(entry.getElement()).append("=").append(entry.getCount()).append(",");
+            }
             sb.setLength(sb.length() - 1);
             sb.append("] ");
         }
@@ -1164,7 +1168,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     // CHOOSE CARDS TO DISCARD TO MAXIMUM HAND SIZE
     // ---------------------------------------------------------------
     @Override
-    public CardCollection chooseCardsToDiscardToMaximumHandSize(int numDiscard) {
+    public CardCollectionView chooseCardsToDiscardToMaximumHandSize(int numDiscard) {
         try {
             String gameState = serializeGameState();
             CardCollectionView hand = player.getCardsIn(ZoneType.Hand);

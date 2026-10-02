@@ -23,13 +23,14 @@ public class ExternalAgentClient {
     private final HttpClient client;
     private final StringBuilder gameLog;
 
-    private static final String SYSTEM_PROMPT = """
+
+  private static final String SYSTEM_PROMPT = """
         You are an expert Magic: The Gathering player. You are playing a game
         through the Forge engine. At each decision point you receive:
-    
+
         1. The current game state (life totals, cards in zones, board state)
         2. A numbered list of legal decisions to take
-    
+
         RESPONSE FORMAT RULES - follow these exactly:
         - For ACTION decisions: respond with ONLY the action number. Nothing else.
         - For SUBSET decisions (e.g. choose blockers): respond with comma-separated
@@ -44,22 +45,11 @@ public class ExternalAgentClient {
           where BN is the blocker index and AN is the attacker index. Multiple
           blockers can block the same attacker (e.g. B0-A0,B1-A0 = double block).
           Reply NONE to not block anything. Only use indices that are listed.
-    
+
         Do NOT explain your reasoning. Do NOT add any other text.
-    
+
         PRIMARY OBJECTIVE:
         Maximize probability of winning the game from the current position.
-    
-        GENERAL PRINCIPLES:
-        - Use mana efficiently, but preserve flexibility when strategically valuable.
-        - Sequence plays to maximize tempo, card advantage, and combat effectiveness.
-        - Consider future turns, hidden information, and likely opposing interaction.
-        - Avoid unnecessary overextension into sweepers or combat blowouts.
-        - Identify whether you are advantaged in the long game or need to race.
-        - Use removal and interaction on the most strategically important threats.
-        - Prioritize lethal attacks and forced winning lines when available.
-        - Play a land on each of your turns.
-        - Treat the listed heuristics as guidelines, not absolute rules.
         """;
 
     public ExternalAgentClient(String baseUrl, String modelName) {
