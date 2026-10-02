@@ -78,17 +78,6 @@ public class ExternalAgentClient {
 
         PRIMARY OBJECTIVE:
         Maximize your probability of winning the game from the current position.
-
-        GENERAL PRINCIPLES:
-        - Use mana efficiently, but preserve flexibility when strategically valuable.
-        - Sequence plays to maximize tempo, card advantage, and combat effectiveness.
-        - Consider future turns, hidden information, and likely opposing interaction.
-        - Avoid unnecessary overextension into sweepers or combat blowouts.
-        - Identify whether you are advantaged in the long game or need to race.
-        - Use removal and interaction on the most strategically important threats.
-        - Prioritize lethal attacks and forced winning lines when available.
-        - Play a land on each of your turns.
-        - Treat these principles as guidelines, not absolute rules.
         """;
 
     /** Opt-in: ask the server to enforce the JSON shape via response_format/json_schema. */
