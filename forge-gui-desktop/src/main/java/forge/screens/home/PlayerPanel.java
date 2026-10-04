@@ -39,6 +39,7 @@ import forge.localinstance.properties.ForgePreferences;
 import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.localinstance.skin.FSkinProp;
 import forge.model.FModel;
+import forge.player.GamePlayerUtil;
 import forge.screens.deckeditor.CDeckEditorUI;
 import forge.screens.deckeditor.controllers.CEditorVariant;
 import forge.screens.home.sanctioned.AvatarSelector;
@@ -80,6 +81,7 @@ public class PlayerPanel extends FPanel {
     private final FTextField txtPlayerName = new FTextField.Builder().build();
     private FRadioButton radioHuman;
     private FRadioButton radioAi;
+    private FRadioButton radioLlm;
     private JCheckBoxMenuItem radioAiUseSimulation;
     private FRadioButton radioOpen;
     private FCheckBox chkReady;
@@ -153,7 +155,8 @@ public class PlayerPanel extends FPanel {
 
         createPlayerTypeOptions();
         this.add(radioHuman, "gapright 5px");
-        this.add(radioAi, "wrap");
+        this.add(radioAi, "gapright 5px");
+        this.add(radioLlm, "wrap");
 
         int cellY = 1;
         if (prefs.getPrefBoolean(FPref.UI_ENABLE_AI_PICKER)) {
@@ -263,31 +266,47 @@ public class PlayerPanel extends FPanel {
         if (mayRemove) {
             radioHuman.setEnabled(mayControl);
             radioAi.setEnabled(mayControl);
+            radioLlm.setEnabled(mayControl);
             radioOpen.setEnabled(mayControl);
         } else {
             radioHuman.setVisible(mayControl);
             radioAi.setVisible(mayControl);
+            radioLlm.setVisible(mayControl);
             radioOpen.setVisible(mayControl);
         }
 
         radioHuman.setSelected(type == LobbySlotType.LOCAL);
-        radioAi.setSelected(type == LobbySlotType.AI);
+        radioAi.setSelected(type == LobbySlotType.AI && !isLlm());
+        radioLlm.setSelected(type == LobbySlotType.AI && isLlm());
         radioOpen.setSelected(type == LobbySlotType.OPEN);
 
         updateVariantControlsVisibility();
     }
 
-    private FMouseAdapter radioMouseAdapter(final FRadioButton source, final LobbySlotType type) {
+    /** An AI slot whose name carries the LLM tag is controlled by the external LLM agent. */
+    private boolean isLlm() {
+        return getPlayerName().contains(GamePlayerUtil.LLM_NAME_TAG);
+    }
+
+    private void applyLlmTag(final boolean llm) {
+        String name = getPlayerName().replace(GamePlayerUtil.LLM_NAME_TAG, "").trim();
+        if (llm) {
+            name = (name + " " + GamePlayerUtil.LLM_NAME_TAG).trim();
+        }
+        setPlayerName(name);
+    }
+
+    private FMouseAdapter radioMouseAdapter(final FRadioButton source, final LobbySlotType type, final boolean llm) {
         return new FMouseAdapter() {
             @Override public void onLeftClick(final MouseEvent e) {
                 if (!source.isEnabled()) {
                     return;
                 }
-                setType(type);
-                if (type == LobbySlotType.AI && getPlayerName().isEmpty()) {
-                    final String newName = NameGenerator.getRandomName("Any", "Any", lobby.getPlayerNames());
-                    setPlayerName(newName);
+                if (type == LobbySlotType.AI && getPlayerName().replace(GamePlayerUtil.LLM_NAME_TAG, "").trim().isEmpty()) {
+                    setPlayerName(NameGenerator.getRandomName("Any", "Any", lobby.getPlayerNames()));
                 }
+                applyLlmTag(llm);
+                setType(type);
                 lobby.firePlayerChangeListener(index);
                 avatarLabel.requestFocusInWindow();
                 lobby.updateVanguardList(index);
@@ -414,7 +433,7 @@ public class PlayerPanel extends FPanel {
             radioHuman.setSelected(true);
             break;
         case AI:
-            radioAi.setSelected(true);
+            (isLlm() ? radioLlm : radioAi).setSelected(true);
             break;
         case OPEN:
             radioOpen.setSelected(true);
@@ -430,6 +449,7 @@ public class PlayerPanel extends FPanel {
             setType(LobbySlotType.REMOTE);
             radioHuman.setSelected(false);
             radioAi.setSelected(false);
+            radioLlm.setSelected(false);
             radioOpen.setSelected(false);
         } else {
             setType(LobbySlotType.OPEN);
@@ -559,7 +579,8 @@ public class PlayerPanel extends FPanel {
 
     private void createPlayerTypeOptions() {
         radioHuman = new FRadioButton(localizer.getMessage("lblHuman"));
-        radioAi = new FRadioButton(localizer.getMessage("lblAI"));
+        radioAi = new FRadioButton(localizer.getMessage("lblForgeAI"));
+        radioLlm = new FRadioButton(localizer.getMessage("lblLlmAI"));
         radioOpen = new FRadioButton(localizer.getMessage("lblOpen"));
 
         final JPopupMenu menu = new  JPopupMenu();
@@ -568,13 +589,15 @@ public class PlayerPanel extends FPanel {
         radioAiUseSimulation.addActionListener(e -> lobby.firePlayerChangeListener(index));
         radioAi.setComponentPopupMenu(menu);
 
-        radioHuman.addMouseListener(radioMouseAdapter(radioHuman, LobbySlotType.LOCAL));
-        radioAi.addMouseListener   (radioMouseAdapter(radioAi,    LobbySlotType.AI));
-        radioOpen.addMouseListener (radioMouseAdapter(radioOpen,  LobbySlotType.OPEN));
+        radioHuman.addMouseListener(radioMouseAdapter(radioHuman, LobbySlotType.LOCAL, false));
+        radioAi.addMouseListener   (radioMouseAdapter(radioAi,    LobbySlotType.AI,    false));
+        radioLlm.addMouseListener  (radioMouseAdapter(radioLlm,   LobbySlotType.AI,    true));
+        radioOpen.addMouseListener (radioMouseAdapter(radioOpen,  LobbySlotType.OPEN,  false));
 
         final ButtonGroup tempBtnGroup = new ButtonGroup();
         tempBtnGroup.add(radioHuman);
         tempBtnGroup.add(radioAi);
+        tempBtnGroup.add(radioLlm);
         tempBtnGroup.add(radioOpen);
     }
 

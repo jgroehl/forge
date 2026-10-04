@@ -18,6 +18,9 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.Set;
 
 public final class GamePlayerUtil {
+    /** Players whose name contains this tag are controlled by the external LLM agent. */
+    public static final String LLM_NAME_TAG = "[LLM]";
+
     private GamePlayerUtil() { }
     private static Localizer localizer = Localizer.getInstance();
     private static final LobbyPlayer guiPlayer = new LobbyPlayerHuman("Human");
@@ -70,10 +73,13 @@ public final class GamePlayerUtil {
 
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
         // Check if an external LLM agent is configured — only for the first AI player
-        String agentUrl = System.getProperty("forge.external.agent.url");
-        if (agentUrl != null && !agentUrl.isEmpty() && name.contains("[LLM]")) {
-            String modelName = System.getProperty("forge.external.agent.model", "qwen3-vl-4b");
-            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl, modelName);
+        if (name.contains(LLM_NAME_TAG)) {
+            String agentUrl = StringUtils.defaultIfBlank(FModel.getPreferences().getPref(FPref.LLM_AGENT_URL),
+                    System.getProperty("forge.external.agent.url", FPref.LLM_AGENT_URL.getDefault()));
+            String modelName = StringUtils.defaultIfBlank(FModel.getPreferences().getPref(FPref.LLM_AGENT_MODEL),
+                    System.getProperty("forge.external.agent.model", FPref.LLM_AGENT_MODEL.getDefault()));
+            boolean minimal = "minimal".equalsIgnoreCase(FModel.getPreferences().getPref(FPref.LLM_PROMPT_TEMPLATE));
+            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl.trim(), modelName.trim(), minimal);
             player.setAvatarIndex(avatarIndex);
             player.setSleeveIndex(sleeveIndex);
             return player;

@@ -197,6 +197,9 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         SUBMENU_UTILITIES ("false"),
 
         UI_CURRENT_AI_PROFILE ("Default"),
+        LLM_AGENT_URL ("localhost:1234"),
+        LLM_AGENT_MODEL ("qwen3-vl-4b"),
+        LLM_PROMPT_TEMPLATE ("full"),
         MATCH_AI_SIDEBOARDING_MODE("Human For AI"),
         MATCH_AI_TIMEOUT("5"),
         UI_ENABLE_AI_CHEATS ("false"),
