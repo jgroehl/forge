@@ -28,6 +28,7 @@ public class ExternalAgentClient {
 
     private final String baseUrl;
     private final String modelName;
+    private final boolean minimalPrompt;
     private final HttpClient client;
     private final StringBuilder gameLog;
 
@@ -80,6 +81,15 @@ public class ExternalAgentClient {
         Maximize your probability of winning the game from the current position.
         """;
 
+    /** Shorter system prompt for small or context-limited models. */
+    private static final String MINIMAL_SYSTEM_PROMPT = """
+        You play Magic: The Gathering via the Forge rules engine. Each request gives
+        the GAME STATE, a DECISION, the legal OPTIONS and an ANSWER FORMAT.
+        Reply with ONE JSON object and nothing else:
+        {"reason": "<1-2 short sentences>", "action": "<answer in the requested format>"}
+        Only use indices and labels listed in OPTIONS. Maximize your chance of winning.
+        """;
+
     /** Opt-in: ask the server to enforce the JSON shape via response_format/json_schema. */
     private static final String RESPONSE_FORMAT = """
         ,"response_format":{"type":"json_schema","json_schema":{"name":"decision","strict":true,\
@@ -87,8 +97,14 @@ public class ExternalAgentClient {
         "required":["reason","action"],"additionalProperties":false}}}""";
 
     public ExternalAgentClient(String baseUrl, String modelName) {
-        this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this(baseUrl, modelName, false);
+    }
+
+    public ExternalAgentClient(String baseUrl, String modelName, boolean minimalPrompt) {
+        String url = baseUrl.contains("://") ? baseUrl : "http://" + baseUrl;
+        this.baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
         this.modelName = modelName;
+        this.minimalPrompt = minimalPrompt;
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -304,7 +320,7 @@ public class ExternalAgentClient {
             return input;
         }
 
-        String systemContent = SYSTEM_PROMPT + "\n\nGAME LOG SO FAR:\n"
+        String systemContent = (minimalPrompt ? MINIMAL_SYSTEM_PROMPT : SYSTEM_PROMPT) + "\n\nGAME LOG SO FAR:\n"
                 + (gameLog.length() == 0 ? "(no events yet)\n" : gameLog.toString());
 
         String json = "{" +

@@ -59,8 +59,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
                                     String agentUrl, String modelName) {
+        this(game, p, lp, agentUrl, modelName, false);
+    }
+
+    public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
+                                    String agentUrl, String modelName, boolean minimalPrompt) {
         super(game, p, lp);
-        this.agent = new ExternalAgentClient(agentUrl, modelName);
+        this.agent = new ExternalAgentClient(agentUrl, modelName, minimalPrompt);
     }
 
     @Override

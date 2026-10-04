@@ -19,11 +19,17 @@ public class LobbyPlayerExternal extends LobbyPlayer implements IGameEntitiesFac
 
     private final String agentUrl;
     private final String modelName;
+    private final boolean minimalPrompt;
 
     public LobbyPlayerExternal(String name, String agentUrl, String modelName) {
+        this(name, agentUrl, modelName, false);
+    }
+
+    public LobbyPlayerExternal(String name, String agentUrl, String modelName, boolean minimalPrompt) {
         super(name);
         this.agentUrl = agentUrl;
         this.modelName = modelName;
+        this.minimalPrompt = minimalPrompt;
     }
 
     public LobbyPlayerExternal(String name, String agentUrl) {
@@ -39,7 +45,7 @@ public class LobbyPlayerExternal extends LobbyPlayer implements IGameEntitiesFac
     @Override
     public Player createIngamePlayer(Game game, int id) {
         Player p = new Player(getName(), game, id);
-        p.setFirstController(new PlayerControllerExternal(game, p, this, agentUrl, modelName));
+        p.setFirstController(new PlayerControllerExternal(game, p, this, agentUrl, modelName, minimalPrompt));
         return p;
     }
 
