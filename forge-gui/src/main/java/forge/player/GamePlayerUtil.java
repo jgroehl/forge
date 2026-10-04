@@ -71,15 +71,20 @@ public final class GamePlayerUtil {
         return createAiPlayer(name, avatarIndex, sleeveIndex, options, "");
     }
 
+    /** An LLM player setting: the -D system property when given, otherwise the AI Settings preference. */
+    private static String llmSetting(final String property, final FPref pref) {
+        return StringUtils.defaultIfBlank(System.getProperty(property), FModel.getPreferences().getPref(pref)).trim();
+    }
+
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
         // Check if an external LLM agent is configured — only for the first AI player
         if (name.contains(LLM_NAME_TAG)) {
-            String agentUrl = StringUtils.defaultIfBlank(FModel.getPreferences().getPref(FPref.LLM_AGENT_URL),
-                    System.getProperty("forge.external.agent.url", FPref.LLM_AGENT_URL.getDefault()));
-            String modelName = StringUtils.defaultIfBlank(FModel.getPreferences().getPref(FPref.LLM_AGENT_MODEL),
-                    System.getProperty("forge.external.agent.model", FPref.LLM_AGENT_MODEL.getDefault()));
-            boolean minimal = "minimal".equalsIgnoreCase(FModel.getPreferences().getPref(FPref.LLM_PROMPT_TEMPLATE));
-            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl.trim(), modelName.trim(), minimal);
+            // -D system properties (set by the ForgeAI game runner) override the AI Settings preferences,
+            // which always return a value (their defaults) and would otherwise hide the command line
+            String agentUrl = llmSetting("forge.external.agent.url", FPref.LLM_AGENT_URL);
+            String modelName = llmSetting("forge.external.agent.model", FPref.LLM_AGENT_MODEL);
+            String template = llmSetting("forge.external.agent.systemPrompt", FPref.LLM_PROMPT_TEMPLATE);
+            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl.trim(), modelName.trim(), template);
             player.setAvatarIndex(avatarIndex);
             player.setSleeveIndex(sleeveIndex);
             return player;

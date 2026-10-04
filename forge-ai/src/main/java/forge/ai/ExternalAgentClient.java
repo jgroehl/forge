@@ -28,7 +28,7 @@ public class ExternalAgentClient {
 
     private final String baseUrl;
     private final String modelName;
-    private final boolean minimalPrompt;
+    private final String promptTemplate;
     private final HttpClient client;
     private final StringBuilder gameLog;
 
@@ -46,9 +46,6 @@ public class ExternalAgentClient {
         3. OPTIONS: the legal choices, each with an index or label. Only these
            choices are legal.
         4. ANSWER FORMAT: exactly what the "action" field must contain.
-        The GAME LOG at the end of this message lists earlier events and decisions
-        in this game, including your own earlier reasoning. Use it to follow
-        through on your plans.
 
         RESPONSE FORMAT - follow it exactly:
         Reply with ONE JSON object and nothing else (no markdown code fences, no
@@ -81,14 +78,19 @@ public class ExternalAgentClient {
         Maximize your probability of winning the game from the current position.
         """;
 
-    /** Shorter system prompt for small or context-limited models. */
-    private static final String MINIMAL_SYSTEM_PROMPT = """
-        You play Magic: The Gathering via the Forge rules engine. Each request gives
-        the GAME STATE, a DECISION, the legal OPTIONS and an ANSWER FORMAT.
-        Reply with ONE JSON object and nothing else:
-        {"reason": "<1-2 short sentences>", "action": "<answer in the requested format>"}
-        Only use indices and labels listed in OPTIONS. Maximize your chance of winning.
+    /**
+     * Short system prompt for models fine-tuned on Forge decisions, which have learned the response format
+     * (each user message still ends with its ANSWER FORMAT section). Select it with the "Minimal" prompt
+     * template in the AI Settings, or -Dforge.external.agent.systemPrompt=minimal. Must stay byte-identical to SYSTEM_PROMPT_GAME_MINIMAL in
+     * ForgeAI utils/system_prompts.py (python -m utils.verify_prompt_sync).
+     */
+    private static final String SYSTEM_PROMPT_MINIMAL = """
+        You are an expert Magic: The Gathering player. Reply with one JSON object: {"reason": "<2-3 sentences>", "action": "<your answer>"}.
         """;
+
+    /** Prompt template names, as stored in the LLM_PROMPT_TEMPLATE preference. */
+    public static final String TEMPLATE_FULL = "full";
+    public static final String TEMPLATE_MINIMAL = "minimal";
 
     /** Opt-in: ask the server to enforce the JSON shape via response_format/json_schema. */
     private static final String RESPONSE_FORMAT = """
@@ -96,15 +98,39 @@ public class ExternalAgentClient {
         "schema":{"type":"object","properties":{"reason":{"type":"string"},"action":{"type":"string"}},\
         "required":["reason","action"],"additionalProperties":false}}}""";
 
-    public ExternalAgentClient(String baseUrl, String modelName) {
-        this(baseUrl, modelName, false);
+    /**
+     * Shadow mode (-Dforge.external.agent.shadow=true): every prompt is built and logged
+     * exactly as in LLM mode, but no model is called. {@link #ask} throws
+     * {@link ShadowModeException}, and the controller's fallbacks let the heuristic
+     * Forge AI make the decision. Used to collect clean prompts for annotation.
+     */
+    public static final boolean SHADOW = Boolean.getBoolean("forge.external.agent.shadow");
+
+    /** Placeholder action logged for shadow-mode prompts. */
+    public static final String SHADOW_ACTION = "SHADOW";
+
+    public static final class ShadowModeException extends RuntimeException {
+        public ShadowModeException() {
+            super("shadow mode: decision delegated to Forge AI", null, false, false);
+        }
     }
 
-    public ExternalAgentClient(String baseUrl, String modelName, boolean minimalPrompt) {
+    /** Log the Forge AI's choice for the preceding shadow-mode prompt, where it is known. */
+    public static void logShadowChoice(String action) {
+        Logger.info("shadow choice: {}", action);
+    }
+
+    public ExternalAgentClient(String baseUrl, String modelName) {
+        this(baseUrl, modelName, "full");
+    }
+
+    public ExternalAgentClient(String baseUrl, String modelName, String promptTemplate) {
         String url = baseUrl.contains("://") ? baseUrl : "http://" + baseUrl;
         this.baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
         this.modelName = modelName;
-        this.minimalPrompt = minimalPrompt;
+        this.promptTemplate = promptTemplate;
+        Logger.info("LLM agent: model {} at {}, system prompt template: {}", modelName, this.baseUrl,
+                TEMPLATE_MINIMAL.equalsIgnoreCase(promptTemplate) ? TEMPLATE_MINIMAL : TEMPLATE_FULL);
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -301,6 +327,13 @@ public class ExternalAgentClient {
     // ---------------------------------------------------------------
 
     private AgentResponse ask(String userMessage) {
+        if (SHADOW) {
+            Logger.info(jsonEscape(modelName));
+            Logger.info("=== LLM REQUEST ===\n{}", userMessage);
+            Logger.info("=== LLM RESPONSE ===\n{}\n====================",
+                    "{\"reason\": \"\", \"action\": \"" + SHADOW_ACTION + "\"}");
+            throw new ShadowModeException();
+        }
         String content = callLLM(userMessage);
         AgentResponse response = parseResponse(content);
         if (!response.reason().isEmpty()) {
@@ -320,8 +353,11 @@ public class ExternalAgentClient {
             return input;
         }
 
-        String systemContent = (minimalPrompt ? MINIMAL_SYSTEM_PROMPT : SYSTEM_PROMPT) + "\n\nGAME LOG SO FAR:\n"
-                + (gameLog.length() == 0 ? "(no events yet)\n" : gameLog.toString());
+        // Each request is self-contained: the game log is kept for debugging but not sent to the model
+        String systemContent = switch (promptTemplate == null ? "" : promptTemplate.toLowerCase()) {
+            case TEMPLATE_MINIMAL -> SYSTEM_PROMPT_MINIMAL;
+            default -> SYSTEM_PROMPT;
+        };
 
         String json = "{" +
                 "\"model\":\"" + jsonEscape(modelName) + "\"," +

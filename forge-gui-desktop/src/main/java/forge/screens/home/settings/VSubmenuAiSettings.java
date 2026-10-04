@@ -25,8 +25,7 @@ import net.miginfocom.swing.MigLayout;
 public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
     SINGLETON_INSTANCE;
 
-    private static final String TEMPLATE_FULL = "full";
-    private static final String TEMPLATE_MINIMAL = "minimal";
+    private final String[] templates = {"full", "minimal"};
 
     private final Localizer localizer = Localizer.getInstance();
     private DragCell parentCell;
@@ -51,7 +50,7 @@ public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
         txtAddress.addFocusListener(saveOnFocusLost(FPref.LLM_AGENT_URL, txtAddress));
         txtModel.addFocusListener(saveOnFocusLost(FPref.LLM_AGENT_MODEL, txtModel));
         cbTemplate.addActionListener(e -> {
-            final String value = cbTemplate.getSelectedIndex() == 1 ? TEMPLATE_MINIMAL : TEMPLATE_FULL;
+            final String value = templates[Math.max(0, cbTemplate.getSelectedIndex())];
             FModel.getPreferences().setPref(FPref.LLM_PROMPT_TEMPLATE, value);
             FModel.getPreferences().save();
         });
@@ -78,8 +77,14 @@ public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
     public void refreshFromPrefs() {
         txtAddress.setText(FModel.getPreferences().getPref(FPref.LLM_AGENT_URL));
         txtModel.setText(FModel.getPreferences().getPref(FPref.LLM_AGENT_MODEL));
-        cbTemplate.setSelectedIndex(
-                TEMPLATE_MINIMAL.equalsIgnoreCase(FModel.getPreferences().getPref(FPref.LLM_PROMPT_TEMPLATE)) ? 1 : 0);
+        final String template = FModel.getPreferences().getPref(FPref.LLM_PROMPT_TEMPLATE);
+        int index = 0;
+        for (int i = 0; i < templates.length; i++) {
+            if (templates[i].equalsIgnoreCase(template)) {
+                index = i;
+            }
+        }
+        cbTemplate.setSelectedIndex(index);
     }
 
     @Override

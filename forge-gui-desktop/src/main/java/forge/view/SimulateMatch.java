@@ -104,6 +104,12 @@ public class SimulateMatch {
 
         int i = 1;
 
+        // Number of seats (from the first) piloted by the external LLM agent; defaults to 1
+        int llmSeats = 0;
+        if (System.getProperty("forge.external.agent.url") != null) {
+            llmSeats = Integer.parseInt(System.getProperty("forge.external.agent.seats", "1"));
+        }
+
         if (params.containsKey("d")) {
             for (String deck : params.get("d")) {
                 Deck d = deckFromCommandLineParameter(deck, type);
@@ -120,8 +126,9 @@ public class SimulateMatch {
 //                } else {
 //                    name = TextUtil.concatNoSpace("Ai(", String.valueOf(i), ")-", d.getName());
 //                }
-                if (i == 1 && System.getProperty("forge.external.agent.url") != null) {
-                    name = "[LLM]AI";
+                if (i <= llmSeats) {
+                    // Keep the single-seat name unchanged so existing log parsers still match
+                    name = llmSeats == 1 ? "[LLM]AI" : "[LLM]AI-" + i;
                 } else {
                     name = "ForgeAI ";
                 }

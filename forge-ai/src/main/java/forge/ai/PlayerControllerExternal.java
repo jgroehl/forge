@@ -45,6 +45,7 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,13 +60,13 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
                                     String agentUrl, String modelName) {
-        this(game, p, lp, agentUrl, modelName, false);
+        this(game, p, lp, agentUrl, modelName, "full");
     }
 
     public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
-                                    String agentUrl, String modelName, boolean minimalPrompt) {
+                                    String agentUrl, String modelName, String promptTemplate) {
         super(game, p, lp);
-        this.agent = new ExternalAgentClient(agentUrl, modelName, minimalPrompt);
+        this.agent = new ExternalAgentClient(agentUrl, modelName, promptTemplate);
     }
 
     @Override
@@ -161,10 +162,14 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 sb.append(tag).append("_exile: ");
                 List<String> exileCards = new ArrayList<>();
                 for (Card c : exile) {
-                    exileCards.add(c.getName());
+                    exileCards.add(visibleName(c));
                 }
                 sb.append(String.join(", ", exileCards));
                 sb.append("\n");
+            }
+
+            if (getGame().getRules().hasCommander()) {
+                appendCommanderInfo(sb, tag, p);
             }
             sb.append("\n");
         }
@@ -217,95 +222,154 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     private static final List<Character> MANA_ORDER =
             Arrays.asList('W', 'U', 'B', 'R', 'G', 'C');
 
+    /**
+     * Mana the player can make right now, as one entry per untapped source, plus the total. Uses each source's
+     * playable mana abilities (so summoning-sick creatures and unpayable filters drop out), with the real amount
+     * (Sol Ring: CC, Boros Garrison: RW, Gilded Lotus: 3 of one color) and the total net of activation costs
+     * (an Azorius Signet adds 1). Sources that make one mana of a choice of colors are shown as {G/W/U}.
+     */
     private String buildAvailableMana(Player p) {
-        List<String> fixed = new ArrayList<>();
-        List<String> flexible = new ArrayList<>();
-
+        List<String> single = new ArrayList<>();   // one mana: "W" or "{G/W/U}"
+        List<String> multi = new ArrayList<>();    // more than one mana, or needs mana to activate: named
         int total = 0;
 
         for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
-            // Include ALL untapped mana sources, not just lands
-            if (c.isTapped()) {
-                continue;
-            }
-            List<SpellAbility> manaAbilities = new ArrayList<>(c.getManaAbilities());
-            if (manaAbilities.isEmpty()) {
-                continue;
-            }
-            // Collect all unique mana colors this permanent can produce
-            Set<Character> colors = new LinkedHashSet<>();
+            Set<Character> oneManaColors = new LinkedHashSet<>();
+            String bestMulti = null;
+            int bestNet = 0;
 
-
-            for (SpellAbility sa : manaAbilities) {
-                if (sa.getManaPart() == null) {
+            for (SpellAbility ma : c.getManaAbilities()) {
+                ma.setActivatingPlayer(p);
+                if (ma.getManaPart() == null || !ma.canPlay()) {
                     continue;
                 }
-
-                String produced = sa.getManaPart().getOrigProduced();
-                if (produced == null) {
+                int amount = ma.amountOfManaGenerated(true);
+                Cost cost = ma.getPayCosts();
+                ManaCost activation = cost != null && cost.getCostMana() != null ? cost.getCostMana().getMana() : null;
+                int manaCost = activation != null ? activation.getCMC() : 0;
+                int net = amount - manaCost;
+                if (amount <= 0 || net <= 0) {
                     continue;
                 }
-
-                boolean producesColored = false;
-
-                Matcher matcher = Pattern.compile("[WUBRG]").matcher(produced);
-
-                while (matcher.find()) {
-                    colors.add(matcher.group().charAt(0));
-                    producesColored = true;
+                List<Character> colors = manaColors(ma);
+                if (colors.isEmpty()) {
+                    continue;
                 }
-
-                // Only include colorless if it's truly colorless-only
-                if (!producesColored && produced.contains("C")) {
-                    colors.add('C');
+                if (amount == 1 && manaCost == 0) {
+                    oneManaColors.addAll(colors);
+                    bestNet = Math.max(bestNet, 1);
+                } else if (net > bestNet || bestMulti == null && net == bestNet) {
+                    bestNet = net;
+                    bestMulti = describeMultiMana(ma, colors, amount, manaCost > 0 ? activation.toString() : null)
+                            + " (" + visibleName(c) + ")";
                 }
             }
-            if (colors.isEmpty()) {
-                continue;
+
+            if (bestMulti != null && bestNet > 1 || bestMulti != null && oneManaColors.isEmpty()) {
+                multi.add(bestMulti);
+                total += bestNet;
+            } else if (!oneManaColors.isEmpty()) {
+                List<Character> ordered = new ArrayList<>(oneManaColors);
+                ordered.sort(Comparator.comparingInt(MANA_ORDER::indexOf));
+                single.add(ordered.size() == 1 ? String.valueOf(ordered.get(0))
+                        : "{" + ordered.stream().map(String::valueOf).collect(Collectors.joining("/")) + "}");
+                total += 1;
             }
-
-            // Normalize mana ordering to WUBRGC
-            List<Character> ordered = new ArrayList<>(colors);
-            ordered.sort(Comparator.comparingInt(MANA_ORDER::indexOf));
-
-            if (ordered.size() == 1) {
-                fixed.add(String.valueOf(ordered.get(0)));
-            } else {
-                StringBuilder flex = new StringBuilder("{");
-
-                for (int i = 0; i < ordered.size(); i++) {
-                    if (i > 0) {
-                        flex.append("/");
-                    }
-                    flex.append(ordered.get(i));
-                }
-                flex.append("}");
-                flexible.add(flex.toString());
-            }
-            total++;
         }
 
-        // Sort fixed mana in WUBRGC order
-        fixed.sort(Comparator.comparingInt(s ->
-                MANA_ORDER.indexOf(s.charAt(0))));
-        Collections.sort(flexible);
-        StringBuilder sb = new StringBuilder();
-
-        for (String s : fixed) {
-            sb.append(s);
-        }
-        for (String s : flexible) {
-            sb.append(s);
-        }
         if (total == 0) {
             return "0 (0 total)";
         }
-
-        return sb.toString() + " (" + total + " total)";
+        single.sort(Comparator.comparingInt((String s) -> s.length()).thenComparingInt(s -> MANA_ORDER.indexOf(s.charAt(0) == '{' ? s.charAt(1) : s.charAt(0))));
+        List<String> parts = new ArrayList<>(single);
+        parts.addAll(multi);
+        return String.join(", ", parts) + " (" + total + " total)";
     }
 
-    private static String cardToStringCompact(Card c) {
-        StringBuilder sb = new StringBuilder(c.getName());
+    /** Colors one mana ability can produce, in WUBRGC order ("Any" and reflected mana resolved). */
+    private static List<Character> manaColors(SpellAbility ma) {
+        AbilityManaPart mp = ma.getManaPart();
+        Set<Character> colors = new LinkedHashSet<>();
+        String produced;
+        if (ma.getApi() == ApiType.ManaReflected) {
+            produced = CardUtil.getReflectableManaColors(ma).stream()
+                    .map(MagicColor::toShortString).collect(Collectors.joining(" "));
+        } else if (mp.isAnyMana()) {
+            produced = "W U B R G";
+        } else {
+            produced = mp.mana(ma);
+        }
+        for (String token : produced.split(" ")) {
+            if (token.length() == 1 && MANA_ORDER.contains(token.charAt(0))) {
+                colors.add(token.charAt(0));
+            }
+        }
+        List<Character> ordered = new ArrayList<>(colors);
+        ordered.sort(Comparator.comparingInt(MANA_ORDER::indexOf));
+        return ordered;
+    }
+
+    /** "CC", "RW", "3 of {W/U/B/R/G}", "WU for {1}" (activation: the mana cost to activate, or null). */
+    private static String describeMultiMana(SpellAbility ma, List<Character> colors, int amount, String activation) {
+        AbilityManaPart mp = ma.getManaPart();
+        String what;
+        if (mp.isAnyMana() || mp.isComboMana() || ma.getApi() == ApiType.ManaReflected) {
+            String choice = colors.size() == 1 ? String.valueOf(colors.get(0))
+                    : "{" + colors.stream().map(String::valueOf).collect(Collectors.joining("/")) + "}";
+            what = amount + " of " + choice;
+        } else {
+            String symbols = mp.mana(ma).replace(" ", "");
+            int perActivation = Math.max(1, symbols.length());
+            what = symbols.repeat(Math.max(1, amount / perActivation));
+        }
+        return activation != null ? what + " for " + activation : what;
+    }
+
+    /**
+     * Commander games only: the player's commanders that are in the command zone right now, at the cost of their
+     * next cast (mana cost plus {2} commander tax per earlier cast), and the commander damage the player has taken.
+     */
+    private static void appendCommanderInfo(StringBuilder sb, String tag, Player p) {
+        List<String> inZone = new ArrayList<>();
+        for (Card c : p.getCommanders()) {
+            if (c.isInZone(ZoneType.Command)) {
+                ManaCost cost = ManaCost.combine(c.getManaCost(), ManaCost.get(2 * p.getCommanderCast(c)));
+                inZone.add(c.getName() + " " + cost);
+            }
+        }
+        if (!inZone.isEmpty()) {
+            sb.append(tag).append("_command: ").append(String.join(", ", inZone)).append("\n");
+        }
+
+        List<String> damage = new ArrayList<>();
+        for (Map.Entry<Card, Integer> e : p.getCommanderDamage()) {
+            if (e.getValue() > 0) {
+                damage.add(e.getKey().getName() + " " + e.getValue() + "/21");
+            }
+        }
+        if (!damage.isEmpty()) {
+            sb.append(tag).append("_commander_damage_taken: ").append(String.join(", ", damage)).append("\n");
+        }
+    }
+
+    /**
+     * The name this player may know a card by. Face-down cards have no name on their current side: show the real name
+     * when the player may look at the card (cards exiled face down by Gonti, own manifests and morphs), otherwise
+     * just that it is face down.
+     */
+    private String visibleName(Card c) {
+        if (!c.isFaceDown()) {
+            return c.getName();
+        }
+        if (c.mayPlayerLook(player)) {
+            return c.getState(CardStateName.Original).getName() + " (face down)";
+        }
+        return "face-down card";
+    }
+
+    private String cardToStringCompact(Card c) {
+        StringBuilder sb = new StringBuilder(visibleName(c));
+        if (c.isCommander()) sb.append(" [commander]");
         if (c.isCreature()) {
             sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness());
         }
@@ -337,8 +401,8 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         sb.append("]");
     }
 
-    private static String cardToString(Card c) {
-        StringBuilder sb = new StringBuilder(c.getName());
+    private String cardToString(Card c) {
+        StringBuilder sb = new StringBuilder(visibleName(c));
         if (c.isCreature()) {
             sb.append(" ").append(c.getNetPower()).append("/").append(c.getNetToughness());
         }
@@ -353,7 +417,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return sb.toString();
     }
 
-    private static String saToString(SpellAbility sa) {
+    private String saToString(SpellAbility sa) {
         Card c = sa.getHostCard();
         String prefix = "";
         String desc = "";
@@ -365,7 +429,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         } catch (Exception ignored) {}
 
         // Adventure / MDFC back / Omen: secondary state has its own name & text
-        String displayName = c.getName();
+        String displayName = visibleName(c);
         if (saState != null && saState.getStateName() == CardStateName.Secondary) {
             displayName = saState.getName();
         }
@@ -405,6 +469,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     @Override
     public List<SpellAbility> chooseSpellAbilityToPlay() {
+        List<Object> offeredSources = List.of();  // options shown in the prompt, for shadow-mode logging
         try {
             String gameState = serializeGameState();
 
@@ -431,7 +496,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
             if (lands != null && !lands.isEmpty()) {
                 for (Card land : lands) {
-                    actions.add("Play land: " + land.getName() + " " + (land.getOracleText().replace("\\n", " ")));
+                    actions.add("Play land: " + visibleName(land) + " " + (land.getOracleText().replace("\\n", " ")));
                     actionSources.add(land);
                 }
             }
@@ -460,6 +525,9 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                 }
 
                 if (!sa.canPlay(false)) continue;          // false: don't probe optional costs here
+                // canPlay skips the timing check while a conditional "cast as though it had flash" effect is around
+                // (StaticAbilityCastWithFlash.anyWithFlashNeedsInfo); check it here like AiController.canPlaySa does
+                if (!sa.canCastTiming(player)) continue;
                 if (!ComputerUtilCost.canPayCost(sa, player, false)) continue;
                 if (sa.usesTargeting()) {
                     boolean anyCardTarget = !CardUtil.getValidCardsToTarget(sa).isEmpty();
@@ -549,6 +617,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             actions = dedupActions;
             actionSources = dedupSources;
+            offeredSources = actionSources;
 
             int choice = agent.chooseAction(gameState, actions);
 
@@ -570,10 +639,35 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
 
             return null;
+        } catch (ExternalAgentClient.ShadowModeException e) {
+            List<SpellAbility> aiChoice = super.chooseSpellAbilityToPlay();
+            ExternalAgentClient.logShadowChoice(shadowChoiceIndex(aiChoice, offeredSources));
+            return aiChoice;
         } catch (Exception e) {
             System.err.println("[ExternalAI] chooseSpellAbilityToPlay failed, falling back: " + e);
             return super.chooseSpellAbilityToPlay();
         }
+    }
+
+    /** Index of the Forge AI's choice among the offered actions (0 = PASS), or "?" if it is not among them. */
+    private static String shadowChoiceIndex(List<SpellAbility> aiChoice, List<Object> sources) {
+        if (aiChoice == null || aiChoice.isEmpty()) {
+            return "0";
+        }
+        SpellAbility sa = aiChoice.get(0);
+        for (int i = 1; i < sources.size(); i++) {
+            Object src = sources.get(i);
+            if (src instanceof Card land && sa.isLandAbility() && sa.getHostCard() == land) {
+                return String.valueOf(i);
+            }
+            // Variants (kicker, alt costs) are copies, so fall back to matching host and description
+            if (src instanceof SpellAbility offered && (offered == sa
+                    || offered.getHostCard() == sa.getHostCard()
+                    && offered.getDescription().equals(sa.getDescription()))) {
+                return String.valueOf(i);
+            }
+        }
+        return "?";
     }
 
     private static List<SpellAbility> singleSpellAbilityList(SpellAbility sa) {
