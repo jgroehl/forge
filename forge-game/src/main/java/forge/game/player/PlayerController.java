@@ -236,6 +236,13 @@ public abstract class PlayerController {
     public abstract CardCollectionView chooseCardsToDiscardToMaximumHandSize(int numDiscard);
 
     public abstract CardCollectionView chooseCardsToDelve(int genericAmount, CardCollection grave);
+    /**
+     * Delve choice with the cost-adjustment mode: {@code test} is true while Forge only checks whether a cost can
+     * be paid (nothing is exiled). Controllers that ask an outside decision maker can answer test calls themselves.
+     */
+    public CardCollectionView chooseCardsToDelve(int genericAmount, CardCollection grave, boolean test) {
+        return chooseCardsToDelve(genericAmount, grave);
+    }
     public abstract Map<Card, ManaCostShard> chooseCardsForConvokeOrImprovise(SpellAbility sa, ManaCost manaCost, CardCollectionView untappedCards, boolean artifacts, boolean creatures, Integer maxReduction);
     public abstract List<Card> chooseCardsForSplice(SpellAbility sa, List<Card> cards);
 

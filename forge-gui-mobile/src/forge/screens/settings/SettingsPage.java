@@ -60,6 +60,21 @@ public class SettingsPage extends TabPage<SettingsScreen> {
         lstSettings.addGroup(Forge.getLocalizer().getMessage("lblVibrationOptions"));
         lstSettings.addGroup(Forge.getLocalizer().getMessage("SoundOptions"));
         lstSettings.addGroup(Forge.getLocalizer().getMessage("ServerPreferences"));
+        lstSettings.addGroup(Forge.getLocalizer().getMessage("lblAiSettings"));
+
+        // LLM AI players (group 9): used by lobby seats switched to "LLM AI"
+        lstSettings.addItem(new TextSetting(FPref.LLM_AGENT_URL,
+                Forge.getLocalizer().getMessage("lblLlmAgentAddress"),
+                Forge.getLocalizer().getMessage("nlLlmAgentAddress")), 9);
+        lstSettings.addItem(new TextSetting(FPref.LLM_AGENT_MODEL,
+                Forge.getLocalizer().getMessage("lblLlmAgentModel"),
+                Forge.getLocalizer().getMessage("nlLlmAgentModel")), 9);
+        Map<String, String> llmTemplates = new LinkedHashMap<>();
+        llmTemplates.put(Forge.getLocalizer().getMessage("lblLlmPromptFull"), "full");
+        llmTemplates.put(Forge.getLocalizer().getMessage("lblLlmPromptMinimal"), "minimal");
+        lstSettings.addItem(new LocalizedSelectSetting(FPref.LLM_PROMPT_TEMPLATE,
+                Forge.getLocalizer().getMessage("lblLlmPromptTemplate"),
+                Forge.getLocalizer().getMessage("nlLlmPromptTemplate"), llmTemplates), 9);
 
         // GENERAL SETTINGS TAB
         lstSettings.addItem(new CustomSelectSetting(FPref.UI_LANGUAGE, Forge.getLocalizer().getMessage("cbpSelectLanguage"),
@@ -978,6 +993,29 @@ public class SettingsPage extends TabPage<SettingsScreen> {
         }
     }
 
+
+    /** Free-text preference (e.g. the LLM server address), edited in an input dialog. */
+    private class TextSetting extends Setting {
+        public TextSetting(FPref pref0, String label0, String description0) {
+            super(pref0, label0 + ":", description0);
+        }
+
+        @Override
+        public void select() {
+            FOptionPane.showInputDialog(label, FModel.getPreferences().getPref((FPref) pref), value -> {
+                if (value == null) {
+                    return; // cancelled
+                }
+                FModel.getPreferences().setPref((FPref) pref, value.trim());
+                FModel.getPreferences().save();
+            });
+        }
+
+        @Override
+        public void drawPrefValue(Graphics g, FSkinFont font, FSkinColor color, float x, float y, float w, float h) {
+            g.drawText(FModel.getPreferences().getPref((FPref) pref), font, color, x, y, w, h, false, Align.right, false);
+        }
+    }
 
     private class IntegerSelectSetting extends Setting {
         private final int minValue;

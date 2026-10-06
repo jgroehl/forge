@@ -29,6 +29,8 @@ public class ExternalAgentClient {
     private final String baseUrl;
     private final String modelName;
     private final String promptTemplate;
+    /** Per-seat decision log (see LlmSeatLog); null when not opened or unavailable. */
+    private LlmSeatLog seatLog;
     private final HttpClient client;
     private final StringBuilder gameLog;
 
@@ -112,6 +114,18 @@ public class ExternalAgentClient {
     public static final class ShadowModeException extends RuntimeException {
         public ShadowModeException() {
             super("shadow mode: decision delegated to Forge AI", null, false, false);
+        }
+    }
+
+    /** Also write this seat's decisions to its own log file (one file per seat and game). */
+    public void openSeatLog(forge.game.Game game, forge.game.player.Player player) {
+        seatLog = LlmSeatLog.open(game, player, modelName, baseUrl,
+                TEMPLATE_MINIMAL.equalsIgnoreCase(promptTemplate) ? TEMPLATE_MINIMAL : TEMPLATE_FULL);
+    }
+
+    private void logToSeat(String request, String response) {
+        if (seatLog != null) {
+            seatLog.exchange(request, response);
         }
     }
 
@@ -332,6 +346,7 @@ public class ExternalAgentClient {
             Logger.info("=== LLM REQUEST ===\n{}", userMessage);
             Logger.info("=== LLM RESPONSE ===\n{}\n====================",
                     "{\"reason\": \"\", \"action\": \"" + SHADOW_ACTION + "\"}");
+            logToSeat(userMessage, "{\"reason\": \"\", \"action\": \"" + SHADOW_ACTION + "\"}");
             throw new ShadowModeException();
         }
         String content = callLLM(userMessage);
@@ -350,6 +365,7 @@ public class ExternalAgentClient {
             System.out.print("YOUR CHOICE> ");
             String input = new java.util.Scanner(System.in).nextLine().trim();
             Logger.info("=== LLM RESPONSE ===\n{}\n====================", input);
+            logToSeat(userMessage, input);
             return input;
         }
 
@@ -399,6 +415,7 @@ public class ExternalAgentClient {
 
             String content = extractContent(responseBody);
             Logger.info("=== LLM RESPONSE ===\n{}\n====================", content);
+            logToSeat(userMessage, content);
             return content;
 
         } catch (Exception e) {

@@ -67,6 +67,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
                                     String agentUrl, String modelName, String promptTemplate) {
         super(game, p, lp);
         this.agent = new ExternalAgentClient(agentUrl, modelName, promptTemplate);
+        this.agent.openSeatLog(game, p);
     }
 
     @Override
@@ -2531,33 +2532,55 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
+    public CardCollectionView chooseCardsToDelve(int genericAmount, CardCollection grave, boolean test) {
+        // Forge runs delve while merely checking whether a spell is affordable (e.g. for every option list);
+        // answer those with the heuristic so the model only sees the real payment
+        return test ? super.chooseCardsToDelve(genericAmount, grave) : chooseCardsToDelve(genericAmount, grave);
+    }
+
+    @Override
     public CardCollectionView chooseCardsToDelve(int genericAmount, CardCollection grave) {
         try {
             if (grave.isEmpty() || genericAmount <= 0) {
                 return super.chooseCardsToDelve(genericAmount, grave);
             }
 
+            int maxExile = Math.min(genericAmount, grave.size());
+            // too few exiles leave generic mana the player can't pay, the cast fails and the spell is offered again
+            int available = ComputerUtilMana.getAvailableManaEstimate(player);
+            int minExile = Math.max(0, Math.min(maxExile, genericAmount - available));
+
             String gameState = serializeGameState();
             List<String> options = new ArrayList<>();
             for (Card c : grave) {
-                options.add(c.getName());
+                options.add(visibleName(c));
             }
 
             String context = "Delve: exile cards from your graveyard to pay for generic mana."
-                    + "\nYou need up to " + genericAmount + " generic mana. Each card exiled pays {1}."
+                    + "\nThe spell has " + genericAmount + " generic mana left to pay and you have about " + available
+                    + " mana available. Each card exiled pays {1}; exile at least " + minExile
+                    + " or the spell can't be paid."
                     + "\nExile cards you don't need for graveyard synergies (flashback, recursion)."
                     + "\nKeep cards you might want to bring back later.";
 
             List<Integer> chosen = agent.chooseSubset(gameState, context, options,
-                    "Choose up to " + genericAmount + " cards to exile for delve.");
+                    "Choose " + minExile + " to " + maxExile + " cards to exile for delve.");
 
             CardCollection result = new CardCollection();
             for (int idx : chosen) {
-                if (idx >= 0 && idx < grave.size() && result.size() < genericAmount) {
+                if (idx >= 0 && idx < grave.size() && result.size() < maxExile && !result.contains(grave.get(idx))) {
                     result.add(grave.get(idx));
                 }
             }
-
+            // top up to the minimum so the cast can still be paid
+            for (Card c : grave) {
+                if (result.size() >= minExile) {
+                    break;
+                }
+                if (!result.contains(c)) {
+                    result.add(c);
+                }
+            }
             return result;
         } catch (Exception e) {
             return super.chooseCardsToDelve(genericAmount, grave);

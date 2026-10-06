@@ -263,7 +263,7 @@ public class CostAdjustment {
 
                 final CardZoneTable table = new CardZoneTable();
                 final CardCollection mutableGrave = new CardCollection(activator.getCardsIn(ZoneType.Graveyard));
-                final CardCollectionView toExile = activator.getController().chooseCardsToDelve(cost.getUnpaidShards(ManaCostShard.GENERIC), mutableGrave);
+                final CardCollectionView toExile = activator.getController().chooseCardsToDelve(cost.getUnpaidShards(ManaCostShard.GENERIC), mutableGrave, test);
                 for (final Card c : toExile) {
                     cost.decreaseGenericMana(1);
                     if (cardsToDelveOut != null) {

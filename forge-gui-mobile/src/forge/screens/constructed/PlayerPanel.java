@@ -45,6 +45,7 @@ import forge.toolbox.FLabel;
 import forge.toolbox.FList;
 import forge.toolbox.FOptionPane;
 import forge.toolbox.FTextField;
+import forge.player.GamePlayerUtil;
 import forge.toolbox.FToggleSwitch;
 import forge.toolbox.GuiChoose;
 import forge.util.Lang;
@@ -73,6 +74,9 @@ public class PlayerPanel extends FContainer {
     private int sleeveArtOffset = Deck.DEFAULT_SLEEVE_OFFSET;
     private final FTextField txtPlayerName = new FTextField(Forge.getLocalizer().getMessage("lblPlayerName"));
     private final FToggleSwitch humanAiSwitch;
+    /** Shown on AI seats: Forge's own AI, or the external LLM agent (seat name carries GamePlayerUtil.LLM_NAME_TAG). */
+    private final FToggleSwitch llmSwitch = new FToggleSwitch(Forge.getLocalizer().getMessage("lblForgeAI"),
+            Forge.getLocalizer().getMessage("lblLlmAI"));
     private final FToggleSwitch devModeSwitch;
 
     private FComboBox<Object> cbTeam = new FComboBox<>();
@@ -233,6 +237,9 @@ public class PlayerPanel extends FContainer {
 
         humanAiSwitch.setChangedHandler(humanAiSwitched);
         add(humanAiSwitch);
+        llmSwitch.setChangedHandler(llmSwitched);
+        add(llmSwitch);
+        refreshLlmSwitch();
 
         add(newLabel(Forge.getLocalizer().getMessage("lblTeam") + ":"));
         cbTeam.setChangedHandler(teamChangedHandler);
@@ -356,6 +363,7 @@ public class PlayerPanel extends FContainer {
             humanAiSwitch.setSize(humanAiSwitch.getAutoSizeWidth(fieldHeight), fieldHeight);
             x = width - humanAiSwitch.getWidth() - PADDING;
             humanAiSwitch.setPosition(x, y);
+            x = layoutLlmSwitch(x, y, fieldHeight);
             w = x - (avatarSize+sleeveSizeW+PADDING) - 3 * PADDING;
             x = (avatarSize+sleeveSizeW+PADDING) + 2 * PADDING;
             if (cbArchenemyTeam.isVisible()) {
@@ -379,6 +387,7 @@ public class PlayerPanel extends FContainer {
             humanAiSwitch.setSize(humanAiSwitch.getAutoSizeWidth(fieldHeight), fieldHeight);
             x = width - humanAiSwitch.getWidth() - PADDING;
             humanAiSwitch.setPosition(x, y);
+            layoutLlmSwitch(x, y, fieldHeight);
         }
 
 
@@ -400,7 +409,8 @@ public class PlayerPanel extends FContainer {
                 w = width - 2 * PADDING;
             } else {
                 x = PADDING;
-                w = (width - 2 * PADDING) - humanAiSwitch.getWidth();
+                w = (width - 2 * PADDING) - humanAiSwitch.getWidth()
+                        - (llmSwitch.isVisible() ? llmSwitch.getWidth() + PADDING : 0);
             }
         }
 
@@ -493,6 +503,7 @@ public class PlayerPanel extends FContainer {
 
                     setMayEdit(screen.getLobby().mayEdit(index));
                     refreshSlotToggle();
+                    refreshLlmSwitch();
                     screen.firePlayerChangeListener(index);
                 } else {
                     setIsReady(toggled);
@@ -518,6 +529,45 @@ public class PlayerPanel extends FContainer {
             }
         }
     };
+
+    private final FEventHandler llmSwitched = new FEventHandler() {
+        @Override
+        public void handleEvent(FEvent e) {
+            // the seat name is what GamePlayerUtil.createAiPlayer checks; push it to the lobby slot right away
+            String name = getPlayerName().replace(GamePlayerUtil.LLM_NAME_TAG, "").trim();
+            if (llmSwitch.isToggled()) {
+                name = (name + " " + GamePlayerUtil.LLM_NAME_TAG).trim();
+            }
+            txtPlayerName.setText(name);
+            screen.firePlayerChangeListener(index);
+        }
+    };
+
+    private boolean isLlm() {
+        return getPlayerName().contains(GamePlayerUtil.LLM_NAME_TAG);
+    }
+
+    /** Show the Forge AI | LLM AI switch on AI seats this player controls, matching the seat name. */
+    private void refreshLlmSwitch() {
+        boolean visible = isAi() && (!allowNetworking || mayControl);
+        llmSwitch.setToggled(isLlm());
+        llmSwitch.setEnabled(mayEdit);
+        if (llmSwitch.isVisible() != visible) {
+            llmSwitch.setVisible(visible);
+            revalidate();
+        }
+    }
+
+    /** Places the Forge AI | LLM AI switch left of the Human | AI switch when shown; returns the new left edge. */
+    private float layoutLlmSwitch(float x, float y, float fieldHeight) {
+        if (!llmSwitch.isVisible()) {
+            return x;
+        }
+        llmSwitch.setSize(llmSwitch.getAutoSizeWidth(fieldHeight), fieldHeight);
+        x -= llmSwitch.getWidth() + PADDING;
+        llmSwitch.setPosition(x, y);
+        return x;
+    }
 
     private boolean isOpenAiSlotToggle() {
         return allowNetworking && index > 0 && mayControl
@@ -570,6 +620,7 @@ public class PlayerPanel extends FContainer {
         @Override
         public void handleEvent(FEvent e) {
             final Object source = e.getSource();
+            refreshLlmSwitch(); // the name may have gained or lost the LLM tag
             if (source instanceof FTextField) { // the text box
                 FTextField nField = (FTextField)source;
                 String newName = nField.getText().trim();
@@ -1041,6 +1092,7 @@ public class PlayerPanel extends FContainer {
 
     public void setPlayerName(String string) {
         txtPlayerName.setText(string);
+        refreshLlmSwitch();
     }
 
     public String getPlayerName() {
@@ -1074,6 +1126,7 @@ public class PlayerPanel extends FContainer {
         }
 
         refreshSlotToggle();
+        refreshLlmSwitch();
 
         boolean isAi = isAi();
         if (isAi != wasAi && deckChooser != null) {
@@ -1128,6 +1181,7 @@ public class PlayerPanel extends FContainer {
         txtPlayerName.setEnabled(mayEdit);
         nameRandomiser.setEnabled(mayEdit);
         refreshSlotToggle();
+        refreshLlmSwitch();
         cbTeam.setEnabled(mayEdit);
         if (devModeSwitch != null) {
             devModeSwitch.setEnabled(mayEdit);
@@ -1154,6 +1208,7 @@ public class PlayerPanel extends FContainer {
         if (mayControl == mayControl0) { return; }
         mayControl = mayControl0;
         refreshSlotToggle();
+        refreshLlmSwitch();
     }
 
     public void setMayRemove(boolean mayRemove0) {
