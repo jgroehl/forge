@@ -43,6 +43,7 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         // Mobile only
         UI_LANDSCAPE_MODE ("false"),
         UI_FULLSCREEN_MODE ("false"),
+        UI_KEEP_MOUSE_IN_FULLSCREEN ("false"),
         UI_VIDEO_MODE ("720p"),
         UI_SELECTOR_MODE ("Default"),
         UI_ANDROID_MINIMIZE_ON_SCRLOCK("false"),
@@ -62,7 +63,7 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         MATCH_HOT_SEAT_MODE("false"),
 
         UI_MATCHES_PER_GAME("3"),
-        UI_APPLIED_VARIANTS(""),
+        UI_LOBBY_SETUP(""),
         UI_RANDOM_FOIL ("false"),
         UI_AVATARS ("0,1"),
         UI_SLEEVES ("0,1"),
@@ -76,6 +77,7 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         UI_OVERLAY_ABILITY_ICONS("true"),
         UI_OVERLAY_DRAFT_RANKING("true"),
         UI_ENABLE_ONLINE_IMAGE_FETCHER ("true"),
+        UI_CACHE_CARD_FRAMES ("true"),
         UI_CARD_DOWNLOAD_LANG ("en"),
         UI_PREFER_LANG_FOR_UNIQUE_CARDS ("false"),
         UI_PREFERRED_ART("LATEST_ART_ALL_EDITIONS"),
@@ -130,6 +132,12 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         UI_ALLOW_ESC_TO_END_TURN ("false"),
         UI_ALT_PLAYERINFOLAYOUT ("false"),
         UI_ALT_PLAYERZONETABS ("false"),
+        UI_COMPACT_LANDSCAPE_LAYOUT ("Left"),
+        UI_FROSTED_STYLE ("true"),
+        UI_COMPACT_ZONE_TABS ("true"),
+        UI_COMPACT_HIDE_MENU ("false"),
+        UI_UNIFIED_PHASE_LABEL ("true"),
+        UI_COMPACT_DOUBLE_TABS ("true"),
         YIELD_INTERRUPT_ON_ATTACKERS ("true"),
         YIELD_INTERRUPT_ON_OPPONENT_SPELL ("true"),
         YIELD_INTERRUPT_ON_TARGETING ("false"),
@@ -198,6 +206,7 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         SUBMENU_SANCTIONED ("true"),
         SUBMENU_ONLINE ("false"),
         SUBMENU_GAUNTLET ("false"),
+        SUBMENU_ROGUE ("true"),
         SUBMENU_QUEST ("false"),
         SUBMENU_PUZZLE("false"),
         SUBMENU_SETTINGS ("false"),
@@ -207,8 +216,9 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
         LLM_AGENT_URL ("localhost:1234"),
         LLM_AGENT_MODEL ("qwen3-vl-4b"),
         LLM_PROMPT_TEMPLATE ("full"),
-        MATCH_AI_SIDEBOARDING_MODE("Human For AI"),
+        MATCH_AI_SIDEBOARDING_MODE("AI"),
         MATCH_AI_TIMEOUT("5"),
+        MATCH_AI_FLAT_MONTE_CARLO("true"),
         UI_ENABLE_AI_CHEATS ("false"),
         //MATCH_EXPERIMENTAL_RESTORE("false"),
 
@@ -357,7 +367,9 @@ public class ForgePreferences extends AbstractPreferences<ForgePreferences.FPref
 
         LAST_IMPORTED_CUBE_ID(""),
 
-        ADV_DISPLAY_PRICE_IN_REWARD_SCREEN("true");
+        ADV_DISPLAY_PRICE_IN_REWARD_SCREEN("true"),
+
+        WELCOME_SHOWN("true");
 
         private final String strDefaultVal;
 

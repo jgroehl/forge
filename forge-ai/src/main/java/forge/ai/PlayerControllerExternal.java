@@ -988,7 +988,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     @Override
     public CardCollection chooseCardsToDiscardFrom(Player playerDiscard, SpellAbility sa,
                                                    CardCollection validCards, int min, int max,
-                                                   CardCollectionView visibleToChooser) {
+                                                   DelayedReveal delayedReveal) {
 
         try {
             String gameState = serializeGameState();
@@ -1019,7 +1019,7 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
             return result;
         } catch (Exception e) {
-            return super.chooseCardsToDiscardFrom(playerDiscard, sa, validCards, min, max, visibleToChooser);
+            return super.chooseCardsToDiscardFrom(playerDiscard, sa, validCards, min, max, delayedReveal);
         }
     }
 

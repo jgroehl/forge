@@ -170,6 +170,15 @@ public class SettingsPage extends TabPage<SettingsScreen> {
                         Config.instance().saveSettings();
                     }
                 }, 0);
+            lstSettings.addItem(new BooleanSetting(FPref.UI_KEEP_MOUSE_IN_FULLSCREEN,
+                Forge.getLocalizer().getMessage("lblKeepMouseInFullscreen"),
+                Forge.getLocalizer().getMessage("nlKeepMouseInFullscreen")) {
+                    @Override
+                    public void select() {
+                        super.select();
+                        Forge.updateMouseConfine();
+                    }
+                }, 0);
             lstSettings.addItem(new CustomSelectSetting(FPref.UI_VIDEO_MODE,
                 Forge.getLocalizer().getMessage("lblVideoMode"),
                 Forge.getLocalizer().getMessage("nlVideoMode"),
@@ -228,6 +237,9 @@ public class SettingsPage extends TabPage<SettingsScreen> {
         lstSettings.addItem(new BooleanSetting(FPref.UI_ENABLE_AI_CHEATS,
             Forge.getLocalizer().getMessage("cbEnableAICheats"),
             Forge.getLocalizer().getMessage("nlEnableAICheats")), 1);
+        lstSettings.addItem(new BooleanSetting(FPref.MATCH_AI_FLAT_MONTE_CARLO,
+            Forge.getLocalizer().getMessage("cbAiFlatMonteCarlo"),
+            Forge.getLocalizer().getMessage("nlAiFlatMonteCarlo")), 1);
         lstSettings.addItem(new BooleanSetting(FPref.LEGACY_MANABURN,
             Forge.getLocalizer().getMessage("cbManaBurn"),
             Forge.getLocalizer().getMessage("nlManaBurn")), 1);
@@ -351,6 +363,86 @@ public class SettingsPage extends TabPage<SettingsScreen> {
                     }
                 }
             }, 1);
+        VPlayerPanel.reloadCompactLayout(); //also converts the old on/off value of this setting
+        lstSettings.addItem(new CustomSelectSetting(FPref.UI_COMPACT_LANDSCAPE_LAYOUT,
+            Forge.getLocalizer().getMessage("lblCompactLayout"),
+            Forge.getLocalizer().getMessage("nlCompactLayout"),
+            new String[] { "Off", "Left", "Right", "Alternate" }) {
+                @Override
+                public void valueChanged(String newValue) {
+                    super.valueChanged(newValue);
+                    VPlayerPanel.reloadCompactLayout();
+                    if (MatchController.instance != null) {
+                        MatchController.instance.resetPlayerPanels();
+                    }
+                    if (MatchController.getView() != null) {
+                        MatchController.getView().revalidate();
+                    }
+                }
+            }, 1);
+        lstSettings.addItem(new BooleanSetting(FPref.UI_COMPACT_HIDE_MENU,
+            Forge.getLocalizer().getMessageorUseDefault("lblCompactHideMenu", "Hide Top Menu (Compact Layout)"),
+            Forge.getLocalizer().getMessageorUseDefault("nlCompactHideMenu", "Hides the Game, Players, Log and other menus to give the battlefield more height. A menu button next to the prompt buttons shows them for a few seconds.")) {
+            @Override
+            public void select() {
+                super.select();
+                VPlayerPanel.reloadMenuHidden();
+                if (MatchController.getView() != null) {
+                    MatchController.getView().revalidate();
+                }
+            }
+        }, 1);
+        lstSettings.addItem(new BooleanSetting(FPref.UI_UNIFIED_PHASE_LABEL,
+            Forge.getLocalizer().getMessageorUseDefault("lblUnifiedPhaseLabel", "Unified Phase Label (Compact Layout)"),
+            Forge.getLocalizer().getMessageorUseDefault("nlUnifiedPhaseLabel", "Shows one phase label next to the Stack menu instead of one on each player panel. Tap it to see and change every player's phase stops.")) {
+            @Override
+            public void select() {
+                super.select();
+                VPlayerPanel.reloadUnifiedPhase();
+                if (MatchController.instance != null) {
+                    MatchController.instance.resetPlayerPanels();
+                }
+                if (MatchController.getView() != null) {
+                    MatchController.getView().revalidate();
+                }
+            }
+        }, 1);
+        lstSettings.addItem(new BooleanSetting(FPref.UI_COMPACT_DOUBLE_TABS,
+            Forge.getLocalizer().getMessageorUseDefault("lblCompactDoubleTabs", "Double Zone Tabs (Compact Layout)"),
+            Forge.getLocalizer().getMessageorUseDefault("nlCompactDoubleTabs", "Shows every zone tab at once in two columns, like the desktop version, instead of one scrolling column. The counts are shown under the icons.")) {
+            @Override
+            public void select() {
+                super.select();
+                VPlayerPanel.reloadDoubleTabs();
+                if (MatchController.instance != null) {
+                    MatchController.instance.resetPlayerPanels();
+                }
+                if (MatchController.getView() != null) {
+                    MatchController.getView().revalidate();
+                }
+            }
+        }, 1);
+        lstSettings.addItem(new BooleanSetting(FPref.UI_COMPACT_ZONE_TABS,
+            Forge.getLocalizer().getMessageorUseDefault("lblCompactZoneTabs", "Compact Zone Tabs (Landscape Mode)"),
+            Forge.getLocalizer().getMessageorUseDefault("nlCompactZoneTabs", "When a zone tab is opened, the zone is shown over the battlefield instead of shrinking it.")) {
+            @Override
+            public void select() {
+                super.select();
+                VPlayerPanel.reloadZoneOverlay();
+                if (MatchController.instance != null) {
+                    MatchController.instance.resetPlayerPanels();
+                }
+            }
+        }, 1);
+        lstSettings.addItem(new BooleanSetting(FPref.UI_FROSTED_STYLE,
+            Forge.getLocalizer().getMessageorUseDefault("lblFrostedStyle", "Frosted Style (Match Screen)"),
+            Forge.getLocalizer().getMessageorUseDefault("nlFrostedStyle", "Gives the match screen a modern frosted glass look in any layout. The compact layout always uses it.")) {
+            @Override
+            public void select() {
+                super.select();
+                VPlayerPanel.reloadFrosted();
+            }
+        }, 1);
         lstSettings.addItem(new BooleanSetting(FPref.UI_HIDE_PHASESTOP,
             Forge.getLocalizer().getMessageorUseDefault("lblHidePhaseStop", "Hide Phase stop (Landscape Mode)"),
             Forge.getLocalizer().getMessageorUseDefault("nlHidePhaseStop", "When enabled, Phase stop is covered by Phase name label. Tap the label to access Phase stop.")) {
@@ -562,6 +654,15 @@ public class SettingsPage extends TabPage<SettingsScreen> {
         lstSettings.addItem(new BooleanSetting(FPref.UI_ENABLE_ONLINE_IMAGE_FETCHER,
             Forge.getLocalizer().getMessage("cbImageFetcher"),
             Forge.getLocalizer().getMessage("nlImageFetcher")), 4);
+        lstSettings.addItem(new BooleanSetting(FPref.UI_CACHE_CARD_FRAMES,
+            Forge.getLocalizer().getMessage("cbCacheCardFrames"),
+            Forge.getLocalizer().getMessage("nlCacheCardFrames")) {
+                @Override
+                public void select() {
+                    super.select();
+                    forge.card.CardImageRenderer.setFrameCacheEnabled(FModel.getPreferences().getPrefBoolean(FPref.UI_CACHE_CARD_FRAMES));
+                }
+            }, 4);
         final Map<String, String> cardLangMapping = ForgeConstants.getScryfallCardLanguageMapping();
         lstSettings.addItem(new CustomSelectSetting(FPref.UI_CARD_DOWNLOAD_LANG, "Card art language",
                 "Preferred language for downloaded card images",
