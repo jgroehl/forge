@@ -20,6 +20,8 @@ import java.util.Set;
 public final class GamePlayerUtil {
     /** Players whose name contains this tag are controlled by the external LLM agent. */
     public static final String LLM_NAME_TAG = "[LLM]";
+    /** Environment variable holding the API key of a hosted LLM; see docs/LLM-AI.md. */
+    public static final String LLM_API_KEY_ENV = "FORGE_LLM_API_KEY";
 
     private GamePlayerUtil() { }
     private static Localizer localizer = Localizer.getInstance();
@@ -80,14 +82,18 @@ public final class GamePlayerUtil {
     }
 
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
-        // Check if an external LLM agent is configured — only for the first AI player
+        // Seats whose name carries the LLM tag are played by the external LLM agent
         if (name.contains(LLM_NAME_TAG)) {
             // -D system properties (set by the ForgeAI game runner) override the AI Settings preferences,
             // which always return a value (their defaults) and would otherwise hide the command line
             String agentUrl = llmSetting("forge.external.agent.url", FPref.LLM_AGENT_URL);
             String modelName = llmSetting("forge.external.agent.model", FPref.LLM_AGENT_MODEL);
             String template = llmSetting("forge.external.agent.systemPrompt", FPref.LLM_PROMPT_TEMPLATE);
-            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl.trim(), modelName.trim(), template);
+            // The key may also come from an environment variable, which keeps it out of the preferences file
+            String apiKey = StringUtils.defaultString(StringUtils.firstNonBlank(
+                    System.getProperty("forge.external.agent.apiKey"), System.getenv(LLM_API_KEY_ENV),
+                    FModel.getPreferences().getPref(FPref.LLM_AGENT_API_KEY))).trim();
+            LobbyPlayerExternal player = new LobbyPlayerExternal(name, agentUrl, modelName, template, apiKey);
             player.setAvatarIndex(avatarIndex);
             player.setSleeveIndex(sleeveIndex);
             return player;

@@ -2,7 +2,6 @@ package forge.ai;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 
 import forge.LobbyPlayer;
@@ -13,30 +12,23 @@ import forge.card.MagicColor;
 import forge.card.mana.ManaCost;
 import forge.card.mana.ManaCostParser;
 import forge.card.mana.ManaCostShard;
-import forge.deck.Deck;
-import forge.deck.DeckSection;
 import forge.game.*;
 import forge.game.ability.AbilityUtils;
 import forge.game.ability.ApiType;
 import forge.game.ability.effects.CharmEffect;
-import forge.game.ability.effects.RollDiceEffect;
 import forge.game.card.*;
 import forge.game.combat.Combat;
 import forge.game.combat.CombatUtil;
 import forge.game.cost.*;
 import forge.game.keyword.KeywordInterface;
-import forge.game.mana.Mana;
 import forge.game.mana.ManaConversionMatrix;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.phase.PhaseType;
 import forge.game.player.*;
 import forge.game.replacement.ReplacementEffect;
 import forge.game.spellability.*;
-import forge.game.staticability.StaticAbility;
 import forge.game.trigger.WrappedAbility;
-import forge.game.zone.PlayerZone;
 import forge.game.zone.ZoneType;
-import forge.item.PaperCard;
 import forge.util.*;
 import forge.util.collect.FCollectionView;
 
@@ -65,16 +57,15 @@ public class PlayerControllerExternal extends PlayerControllerAi {
 
     public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
                                     String agentUrl, String modelName, String promptTemplate) {
+        this(game, p, lp, agentUrl, modelName, promptTemplate, "");
+    }
+
+    public PlayerControllerExternal(Game game, Player p, LobbyPlayer lp,
+                                    String agentUrl, String modelName, String promptTemplate, String apiKey) {
         super(game, p, lp);
-        this.agent = new ExternalAgentClient(agentUrl, modelName, promptTemplate);
+        this.agent = new ExternalAgentClient(agentUrl, modelName, promptTemplate, apiKey);
         this.agent.openSeatLog(game, p);
     }
-
-    @Override
-    public boolean isAI() {
-        return true;
-    }
-
     // ===================================================================
     // Game state serialization
     // ===================================================================
@@ -1584,32 +1575,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public List<PaperCard> sideboard(Deck deck, GameType gameType, String message) {
-        return super.sideboard(deck, gameType, message);
-    }
-
-    @Override
-    public List<PaperCard> chooseCardsYouWonToAddToDeck(List<PaperCard> losses) {
-        return super.chooseCardsYouWonToAddToDeck(losses);
-    }
-
-    @Override
-    public Map<Card, Integer> assignCombatDamage(Card attacker, CardCollectionView blockers,
-                                                 CardCollectionView remaining, int damageDealt, GameEntity defender, boolean overrideOrder) {
-        return super.assignCombatDamage(attacker, blockers, remaining, damageDealt, defender, overrideOrder);
-    }
-
-    @Override
-    public Map<GameEntity, Integer> divideShield(Card effectSource, Map<GameEntity, Integer> affected, int shieldAmount) {
-        return super.divideShield(effectSource, affected, shieldAmount);
-    }
-
-    @Override
-    public Map<Byte, Integer> specifyManaCombo(SpellAbility sa, ColorSet colorSet, int manaAmount, boolean different) {
-        return super.specifyManaCombo(sa, colorSet, manaAmount, different);
-    }
-
-    @Override
     public Integer announceRequirements(SpellAbility ability, int min, int max, String announce) {
         // Keep the hardcoded mana logic for specific APIs - LLM can't do mana math
         if (ability.getApi() != null) {
@@ -1696,28 +1661,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return super.choosePermanentsToDestroy(sa, min, max, validTargets, message);
         }
     }
-
-    @Override
-    public TargetChoices chooseNewTargetsFor(SpellAbility ability, Predicate<GameObject> filter, boolean optional) {
-        return super.chooseNewTargetsFor(ability, filter, optional);
-    }
-
-//    private void fireBecomesTargetTriggers(SpellAbility sa) {
-//        if (sa == null || sa.getTargets() == null || sa.getTargets().isEmpty()) return;
-//        for (GameObject tgt : sa.getTargets()) {
-//            Map<AbilityKey, Object> runParams = AbilityKey.newMap();
-//            runParams.put(AbilityKey.SourceSA, sa);
-//            runParams.put(AbilityKey.Target, tgt);
-//            getGame().getTriggerHandler().runTrigger(
-//                    TriggerType.BecomesTarget, runParams, false);
-//        }
-//        // Also fire the "becomes target once" trigger (different event in Forge)
-//        Map<AbilityKey, Object> onceParams = AbilityKey.newMap();
-//        onceParams.put(AbilityKey.SourceSA, sa);
-//        onceParams.put(AbilityKey.Targets, sa.getTargets());
-//        getGame().getTriggerHandler().runTrigger(
-//                TriggerType.BecomesTargetOnce, onceParams, false);
-//    }
 
     @Override
     public boolean chooseTargetsFor(SpellAbility currentAbility) {
@@ -1999,16 +1942,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public boolean helpPayForAssistSpell(ManaCostBeingPaid cost, SpellAbility sa, int max, int requested) {
-        return super.helpPayForAssistSpell(cost, sa, max, requested);
-    }
-
-    @Override
-    public Player choosePlayerToAssistPayment(FCollectionView<Player> optionList, SpellAbility sa, String title, int max) {
-        return super.choosePlayerToAssistPayment(optionList, sa, title, max);
-    }
-
-    @Override
     public CardCollection chooseCardsForEffectMultiple(Map<String, CardCollection> validMap,
                                                        SpellAbility sa, String title, boolean isOptional) {
         try {
@@ -2172,12 +2105,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public boolean confirmBidAction(SpellAbility sa, PlayerActionConfirmMode mode,
-                                    String string, int bid, Player winner) {
-        return super.confirmBidAction(sa, mode, string, bid, winner);
-    }
-
-    @Override
     public boolean confirmReplacementEffect(ReplacementEffect replacementEffect,
                                             SpellAbility effectSA, GameEntity affected, String question) {
         try {
@@ -2196,12 +2123,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public boolean confirmStaticApplication(Card hostCard, PlayerActionConfirmMode mode,
-                                            String message, String logic) {
-        return super.confirmStaticApplication(hostCard, mode, message, logic);
-    }
-
-    @Override
     public boolean confirmPayment(CostPart costPart, String prompt, SpellAbility sa) {
         try {
             String gameState = serializeGameState();
@@ -2216,16 +2137,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         } catch (Exception e) {
             return super.confirmPayment(costPart, prompt, sa);
         }
-    }
-
-    @Override
-    public List<Card> exertAttackers(List<Card> attackers) {
-        return super.exertAttackers(attackers);
-    }
-
-    @Override
-    public List<Card> enlistAttackers(List<Card> attackers) {
-        return super.enlistAttackers(attackers);
     }
 
     @Override
@@ -2348,18 +2259,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         } catch (Exception e) {
             return super.orderAttackers(blocker, attackers);
         }
-    }
-
-    @Override
-    public void reveal(CardCollectionView cards, ZoneType zone, Player owner,
-                       String messagePrefix, boolean addSuffix) {
-        super.reveal(cards, zone, owner, messagePrefix, addSuffix);
-    }
-
-    @Override
-    public void reveal(List<CardView> cards, ZoneType zone, PlayerView owner,
-                       String messagePrefix, boolean addSuffix) {
-        super.reveal(cards, zone, owner, messagePrefix, addSuffix);
     }
 
     @Override
@@ -2588,18 +2487,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public Map<Card, ManaCostShard> chooseCardsForConvokeOrImprovise(SpellAbility sa,
-                                                                     ManaCost manaCost, CardCollectionView untappedCards, boolean artifacts,
-                                                                     boolean creatures, Integer maxReduction) {
-        return super.chooseCardsForConvokeOrImprovise(sa, manaCost, untappedCards, artifacts, creatures, maxReduction);
-    }
-
-    @Override
-    public List<Card> chooseCardsForSplice(SpellAbility sa, List<Card> cards) {
-        return super.chooseCardsForSplice(sa, cards);
-    }
-
-    @Override
     public void playSpellAbilityNoStack(SpellAbility effectSA, boolean canSetupTargets) {
         if (canSetupTargets) {
             if (effectSA.usesTargeting()) {
@@ -2617,56 +2504,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         }
         super.playSpellAbilityNoStack(effectSA, canSetupTargets);
     }
-
-    @Override
-    public List<SpellAbility> orderSimultaneousSa(List<SpellAbility> activePlayerSAs) {
-        return super.orderSimultaneousSa(activePlayerSAs);
-    }
-
-//    @Override
-//    public List<SpellAbility> orderSimultaneousSa(List<SpellAbility> activePlayerSAs) {
-//        try {
-//            if (activePlayerSAs.size() <= 1) {
-//                return activePlayerSAs;
-//            }
-//
-//            String gameState = serializeGameState();
-//            List<String> options = new ArrayList<>();
-//            for (SpellAbility sa : activePlayerSAs) {
-//                String desc = sa.getHostCard().getName();
-//                String saDesc = sa.getStackDescription();
-//                if (saDesc != null && !saDesc.isEmpty()) {
-//                    desc += ": " + saDesc;
-//                }
-//                options.add(desc);
-//            }
-//
-//            String context = "Multiple abilities are triggering simultaneously."
-//                    + "\nOrder them - first in the list resolves LAST (stack order)."
-//                    + "\nPut the ability you want to resolve first at the END.";
-//
-//            List<Integer> ordering = agent.chooseOrdering(
-//                    gameState + "\nCONTEXT: " + context, options,
-//                    "Order these simultaneous abilities (first = resolves last).");
-//
-//            List<SpellAbility> result = new ArrayList<>();
-//            Set<Integer> used = new HashSet<>();
-//            for (int idx : ordering) {
-//                if (idx >= 0 && idx < activePlayerSAs.size() && !used.contains(idx)) {
-//                    result.add(activePlayerSAs.get(idx));
-//                    used.add(idx);
-//                }
-//            }
-//            for (int i = 0; i < activePlayerSAs.size(); i++) {
-//                if (!used.contains(i)) {
-//                    result.add(activePlayerSAs.get(i));
-//                }
-//            }
-//            return result;
-//        } catch (Exception e) {
-//            return super.orderSimultaneousSa(activePlayerSAs);
-//        }
-//    }
 
     @Override
     public void orderAndPlaySimultaneousSa(List<SpellAbility> activePlayerSAs) {
@@ -2780,68 +2617,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public boolean playSaFromPlayEffect(SpellAbility tgtSA) {
-        return super.playSaFromPlayEffect(tgtSA);
-    }
-
-    @Override
-    public Mana chooseManaFromPool(List<Mana> manaChoices) {
-        return super.chooseManaFromPool(manaChoices);
-    }
-
-    @Override
-    public String chooseSomeType(String kindOfType, SpellAbility sa,
-                                 Collection<String> validTypes, boolean isOptional) {
-        return super.chooseSomeType(kindOfType, sa, validTypes, isOptional);
-    }
-
-    @Override
-    public String chooseSector(Card assignee, String ai, List<String> sectors) {
-        return super.chooseSector(assignee, ai, sectors);
-    }
-
-    @Override
-    public List<Card> chooseContraptionsToCrank(List<Card> contraptions) {
-        return super.chooseContraptionsToCrank(contraptions);
-    }
-
-    @Override
-    public int chooseSprocket(Card assignee, List<Integer> sprockets) {
-        return super.chooseSprocket(assignee, sprockets);
-    }
-
-    @Override
-    public PlanarDice choosePDRollToIgnore(List<PlanarDice> rolls) {
-        return super.choosePDRollToIgnore(rolls);
-    }
-
-    @Override
-    public Integer chooseRollToIgnore(List<Integer> rolls) {
-        return super.chooseRollToIgnore(rolls);
-    }
-
-    @Override
-    public List<Integer> chooseDiceToReroll(List<Integer> rolls) {
-        return super.chooseDiceToReroll(rolls);
-    }
-
-    @Override
-    public Integer chooseRollToModify(List<Integer> rolls) {
-        return super.chooseRollToModify(rolls);
-    }
-
-    @Override
-    public RollDiceEffect.DieRollResult chooseRollToSwap(List<RollDiceEffect.DieRollResult> rolls) {
-        return super.chooseRollToSwap(rolls);
-    }
-
-    @Override
-    public String chooseRollSwapValue(List<String> swapChoices, Integer currentResult,
-                                      int power, int toughness) {
-        return super.chooseRollSwapValue(swapChoices, currentResult, power, toughness);
-    }
-
-    @Override
     public Object vote(SpellAbility sa, String prompt, List<Object> options,
                        ListMultimap<Object, Player> votes, Player forPlayer, boolean optional) {
         try {
@@ -2918,32 +2693,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         } catch (Exception e) {
             return super.tuckCardsViaMulligan(hand, cardsToReturn);
         }
-    }
-
-    @Override
-    public int chooseNumberForCostReduction(SpellAbility sa, int min, int max) {
-        return super.chooseNumberForCostReduction(sa, min, max);
-    }
-
-    @Override
-    public int chooseNumberForKeywordCost(SpellAbility sa, Cost cost,
-                                          KeywordInterface keyword, String prompt, int max) {
-        return super.chooseNumberForKeywordCost(sa, cost, keyword, prompt, max);
-    }
-
-    @Override
-    public int chooseNumber(SpellAbility sa, String title, int min, int max) {
-        return super.chooseNumber(sa, title, min, max);
-    }
-
-    @Override
-    public int chooseNumber(SpellAbility sa, String title, List<Integer> values, Player relatedPlayer) {
-        return super.chooseNumber(sa, title, values, relatedPlayer);
-    }
-
-    @Override
-    public boolean chooseFlipResult(SpellAbility sa, Player flipper, boolean call) {
-        return super.chooseFlipResult(sa, flipper, call);
     }
 
     @Override
@@ -3097,52 +2846,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public ReplacementEffect chooseSingleReplacementEffect(List<ReplacementEffect> possibleReplacers) {
-        return super.chooseSingleReplacementEffect(possibleReplacers);
-    }
-
-//    @Override
-//    public ReplacementEffect chooseSingleReplacementEffect(List<ReplacementEffect> possibleReplacers) {
-//        // Match heuristic AI behavior: empty/single → return first (no choice to make).
-//        // Only consult LLM when there's a real choice between competing replacements.
-//        if (possibleReplacers == null || possibleReplacers.isEmpty()) {
-//            return null;  // matches what list.get(0) would do on empty (NPE-safe variant)
-//        }
-//        if (possibleReplacers.size() == 1) {
-//            return possibleReplacers.get(0);
-//        }
-//
-//        try {
-//            String gameState = serializeGameState();
-//            List<String> options = new ArrayList<>();
-//            for (ReplacementEffect re : possibleReplacers) {
-//                Card host = re.getHostCard();
-//                String hostName = host != null ? host.getName() : "unknown";
-//                String desc = re.getDescription();
-//                if (desc == null || desc.isEmpty()) desc = re.toString();
-//                options.add(hostName + " - " + desc);
-//            }
-//
-//            String context = "Chose which replacement effect to apply.";
-//
-//            int choice = agent.chooseAction(gameState, context, options);
-//            if (choice >= 0 && choice < possibleReplacers.size()) {
-//                return possibleReplacers.get(choice);
-//            }
-//            return possibleReplacers.get(0);
-//        } catch (Exception e) {
-//            System.err.println("[ExternalAI] chooseSingleReplacementEffect FELL BACK: " + e);
-//            e.printStackTrace();
-//            return super.chooseSingleReplacementEffect(possibleReplacers);
-//        }
-//    }
-
-    @Override
-    public StaticAbility chooseSingleStaticAbility(List<StaticAbility> possibleStatics) {
-        return super.chooseSingleStaticAbility(possibleStatics);
-    }
-
-    @Override
     public String chooseProtectionType(SpellAbility sa, List<String> choices) {
         try {
             if (choices.size() <= 1) {
@@ -3165,27 +2868,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             return super.chooseProtectionType(sa, choices);
         }
     }
-
-    // =====================================================================
-// PATCH for PlayerControllerExternal.java
-//
-// Adds:
-//   1. enumerateHybridResolutions(ManaCost) — produces every concrete
-//      monocolored resolution of a cost containing hybrid pips, deduplicated.
-//   2. shardToConcreteAlternatives(ManaCostShard) — per-shard alternative
-//      list (the inner combinatoric step).
-//   3. payManaCost override — consults the LLM when the spell tracks
-//      which colors are spent, then forces the chosen concrete cost.
-//
-// Required imports:
-//   import forge.card.mana.ManaCost;
-//   import forge.card.mana.ManaCostParser;
-//   import forge.card.mana.ManaCostShard;
-//   import forge.card.MagicColor;            // already present
-//   (Cost is already imported. ManaConversionMatrix, ManaCostBeingPaid
-//    are already imported.)
-// =====================================================================
-
 
     // ---------------- payManaCost override ----------------
     @Override
@@ -3400,17 +3082,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public boolean payCombatCost(Card card, Cost cost, SpellAbility sa, String prompt) {
-        return super.payCombatCost(card, cost, sa, prompt);
-    }
-
-    @Override
-    public boolean applyManaToCost(ManaCostBeingPaid toPay, SpellAbility ability,
-                                   String prompt, ManaConversionMatrix matrix, boolean effect) {
-        return super.applyManaToCost(toPay, ability, prompt, matrix, effect);
-    }
-
-    @Override
     public CardCollectionView chooseCardsForCost(CardCollectionView optionList, SpellAbility sa,
                                                  CostPartWithList cpl, int amount, boolean isOptional, String prompt) {
         try {
@@ -3467,12 +3138,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public CostDecisionMakerBase getCostDecisionMaker(Player player, SpellAbility ability,
-                                                      boolean effect, String prompt) {
-        return super.getCostDecisionMaker(player, ability, effect, prompt);
-    }
-
-    @Override
     public boolean payCostToPreventEffect(Cost cost, SpellAbility sa, boolean alreadyPaid,
                                           FCollectionView<Player> allPayers) {
         try {
@@ -3498,22 +3163,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             System.err.println("[ExternalAI] payCostToPreventEffect FELL BACK: " + e);
             return super.payCostToPreventEffect(cost, sa, alreadyPaid, allPayers);
         }
-    }
-
-    @Override
-    public boolean payCostDuringRoll(Cost cost, SpellAbility sa) {
-        return super.payCostDuringRoll(cost, sa);
-    }
-
-    @Override
-    public String chooseCardName(SpellAbility sa, Predicate<ICardFace> cpp,
-                                 String valid, String message) {
-        return super.chooseCardName(sa, cpp, valid, message);
-    }
-
-    @Override
-    public String chooseCardName(SpellAbility sa, List<ICardFace> faces, String message) {
-        return super.chooseCardName(sa, faces, message);
     }
 
     @Override
@@ -3612,11 +3261,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
     }
 
     @Override
-    public void notifyOfValue(SpellAbility saSource, GameObject realtedTarget, String value) {
-        super.notifyOfValue(saSource, realtedTarget, value);
-    }
-
-    @Override
     public CardCollectionView chooseCardsToRevealFromHand(int min, int max, CardCollectionView valid) {
         try {
             if (valid.size() <= min) {
@@ -3704,26 +3348,6 @@ public class PlayerControllerExternal extends PlayerControllerAi {
         return this.player;
     }
 
-    @Override
-    public PlayerZone chooseStartingHand(List<PlayerZone> zones) {
-        return super.chooseStartingHand(zones);
-    }
-
-    @Override
-    public void revealAnte(String message, Multimap<Player, PaperCard> removedAnteCards) {
-        super.revealAnte(message, removedAnteCards);
-    }
-
-    @Override
-    public void revealAISkipCards(String message, Map<Player, Map<DeckSection, List<? extends PaperCard>>> deckCards) {
-        super.revealAISkipCards(message, deckCards);
-    }
-
-    @Override
-    public void revealUnsupported(Map<Player, List<PaperCard>> unsupported) {
-        super.revealUnsupported(unsupported);
-    }
-
     private boolean canAffordOptionalCost(SpellAbility sa, OptionalCostValue ocv) {
         try {
             Cost combined = sa.getPayCosts().copy();
@@ -3750,15 +3374,5 @@ public class PlayerControllerExternal extends PlayerControllerAi {
             }
         }
         return result;
-    }
-
-    @Override
-    public List<CostPart> orderCosts(List<CostPart> costs) {
-        return super.orderCosts(costs);
-    }
-
-    @Override
-    public void resetAtEndOfTurn() {
-        super.resetAtEndOfTurn();
     }
 }

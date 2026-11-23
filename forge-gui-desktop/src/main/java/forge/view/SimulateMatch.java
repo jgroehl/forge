@@ -174,17 +174,10 @@ public class SimulateMatch {
                     sb.append(" vs ");
                 }
                 String profile = aiProfiles != null && aiProfiles.size() >= i ? aiProfiles.get(i - 1) : "";
-                String name;
-//                if (i == 1 && System.getProperty("forge.external.agent.url") != null) {
-//                    name = TextUtil.concatNoSpace("[LLM]Ai(", String.valueOf(i), ")-", d.getName());
-//                } else {
-//                    name = TextUtil.concatNoSpace("Ai(", String.valueOf(i), ")-", d.getName());
-//                }
+                String name = TextUtil.concatNoSpace("Ai(", String.valueOf(i), ")-", d.getName());
                 if (i <= llmSeats) {
                     // Keep the single-seat name unchanged so existing log parsers still match
                     name = llmSeats == 1 ? "[LLM]AI" : "[LLM]AI-" + i;
-                } else {
-                    name = "ForgeAI ";
                 }
                 sb.append(name);
                 if (!profile.isEmpty()) {

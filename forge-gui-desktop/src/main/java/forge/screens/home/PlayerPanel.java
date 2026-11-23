@@ -626,7 +626,7 @@ public class PlayerPanel extends FPanel {
 
     private void createPlayerTypeOptions() {
         radioHuman = new FRadioButton(localizer.getMessage("lblHuman"));
-        radioAi = new FRadioButton(localizer.getMessage("lblForgeAI"));
+        radioAi = new FRadioButton(localizer.getMessage("lblAI"));
         radioLlm = new FRadioButton(localizer.getMessage("lblLlmAI"));
         radioOpen = new FRadioButton(localizer.getMessage("lblOpen"));
 

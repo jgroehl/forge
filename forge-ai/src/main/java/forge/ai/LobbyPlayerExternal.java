@@ -20,16 +20,23 @@ public class LobbyPlayerExternal extends LobbyPlayer implements IGameEntitiesFac
     private final String agentUrl;
     private final String modelName;
     private final String promptTemplate;
+    private final String apiKey;
 
     public LobbyPlayerExternal(String name, String agentUrl, String modelName) {
         this(name, agentUrl, modelName, "full");
     }
 
     public LobbyPlayerExternal(String name, String agentUrl, String modelName, String promptTemplate) {
+        this(name, agentUrl, modelName, promptTemplate, "");
+    }
+
+    /** apiKey: sent as a Bearer token to hosted APIs; empty for local servers. */
+    public LobbyPlayerExternal(String name, String agentUrl, String modelName, String promptTemplate, String apiKey) {
         super(name);
         this.agentUrl = agentUrl;
         this.modelName = modelName;
         this.promptTemplate = promptTemplate;
+        this.apiKey = apiKey;
     }
 
     public LobbyPlayerExternal(String name, String agentUrl) {
@@ -45,7 +52,7 @@ public class LobbyPlayerExternal extends LobbyPlayer implements IGameEntitiesFac
     @Override
     public Player createIngamePlayer(Game game, int id) {
         Player p = new Player(getName(), game, id);
-        p.setFirstController(new PlayerControllerExternal(game, p, this, agentUrl, modelName, promptTemplate));
+        p.setFirstController(new PlayerControllerExternal(game, p, this, agentUrl, modelName, promptTemplate, apiKey));
         return p;
     }
 

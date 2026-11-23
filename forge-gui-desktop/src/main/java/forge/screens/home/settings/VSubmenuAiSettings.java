@@ -4,6 +4,7 @@ import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 
 import javax.swing.JPanel;
+import javax.swing.text.JTextComponent;
 
 import forge.gui.framework.DragCell;
 import forge.gui.framework.DragTab;
@@ -15,6 +16,7 @@ import forge.screens.home.IVSubmenu;
 import forge.screens.home.VHomeUI;
 import forge.toolbox.FComboBox;
 import forge.toolbox.FLabel;
+import forge.toolbox.FPasswordField;
 import forge.toolbox.FTextField;
 import forge.util.Localizer;
 import net.miginfocom.swing.MigLayout;
@@ -34,6 +36,7 @@ public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
     private final JPanel pnlSettings = new JPanel();
     private final FTextField txtAddress = new FTextField.Builder().build();
     private final FTextField txtModel = new FTextField.Builder().build();
+    private final FPasswordField txtApiKey = new FPasswordField();
     private final FComboBox<String> cbTemplate = new FComboBox<>();
 
     VSubmenuAiSettings() {
@@ -45,10 +48,12 @@ public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
 
         addRow("lblLlmAgentAddress", "nlLlmAgentAddress", txtAddress);
         addRow("lblLlmAgentModel", "nlLlmAgentModel", txtModel);
+        addRow("lblLlmApiKey", "nlLlmApiKey", txtApiKey);
         addRow("lblLlmPromptTemplate", "nlLlmPromptTemplate", cbTemplate);
 
         txtAddress.addFocusListener(saveOnFocusLost(FPref.LLM_AGENT_URL, txtAddress));
         txtModel.addFocusListener(saveOnFocusLost(FPref.LLM_AGENT_MODEL, txtModel));
+        txtApiKey.addFocusListener(saveOnFocusLost(FPref.LLM_AGENT_API_KEY, txtApiKey));
         cbTemplate.addActionListener(e -> {
             final String value = templates[Math.max(0, cbTemplate.getSelectedIndex())];
             FModel.getPreferences().setPref(FPref.LLM_PROMPT_TEMPLATE, value);
@@ -65,7 +70,7 @@ public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
         pnlSettings.add(field, "h 30px!, wrap");
     }
 
-    private static FocusAdapter saveOnFocusLost(final FPref pref, final FTextField field) {
+    private static FocusAdapter saveOnFocusLost(final FPref pref, final JTextComponent field) {
         return new FocusAdapter() {
             @Override public void focusLost(final FocusEvent e) {
                 FModel.getPreferences().setPref(pref, field.getText().trim());
@@ -77,6 +82,7 @@ public enum VSubmenuAiSettings implements IVSubmenu<CSubmenuAiSettings> {
     public void refreshFromPrefs() {
         txtAddress.setText(FModel.getPreferences().getPref(FPref.LLM_AGENT_URL));
         txtModel.setText(FModel.getPreferences().getPref(FPref.LLM_AGENT_MODEL));
+        txtApiKey.setText(FModel.getPreferences().getPref(FPref.LLM_AGENT_API_KEY));
         final String template = FModel.getPreferences().getPref(FPref.LLM_PROMPT_TEMPLATE);
         int index = 0;
         for (int i = 0; i < templates.length; i++) {

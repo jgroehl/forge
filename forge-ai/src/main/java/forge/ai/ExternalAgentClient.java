@@ -13,9 +13,10 @@ import org.tinylog.Logger;
 
 /**
  * HTTP client that communicates with an OpenAI-compatible LLM API
- * (e.g. LM Studio, Ollama, vLLM) for game decisions.
+ * (a local server such as LM Studio, Ollama or vLLM, or a hosted API with a key) for game decisions.
+ * Setup: docs/LLM-AI.md.
  *
- * Each decision is a blocking POST to /v1/chat/completions.
+ * Each decision is a blocking POST to the chat completions endpoint (see {@link #chatCompletionsUrl}).
  * The model answers with a JSON object {"reason": "...", "action": "..."}:
  * a short justification followed by the decision itself. Only the action is
  * used to drive the game; the reason is logged and kept in the game log so
@@ -27,8 +28,15 @@ public class ExternalAgentClient {
     public record AgentResponse(String reason, String action) {}
 
     private final String baseUrl;
+    private final String endpoint;
+    /** Sent as a Bearer token when not empty; local servers need none. Never logged. */
+    private final String apiKey;
     private final String modelName;
     private final String promptTemplate;
+    /** Turned off for this client once the server rejects the parameter (current Claude models reject temperature). */
+    private volatile boolean sendTemperature = true;
+    /** Turned on once the server rejects max_tokens (OpenAI reasoning models want max_completion_tokens). */
+    private volatile boolean useMaxCompletionTokens = false;
     /** Per-seat decision log (see LlmSeatLog); null when not opened or unavailable. */
     private LlmSeatLog seatLog;
     private final HttpClient client;
@@ -139,11 +147,18 @@ public class ExternalAgentClient {
     }
 
     public ExternalAgentClient(String baseUrl, String modelName, String promptTemplate) {
+        this(baseUrl, modelName, promptTemplate, "");
+    }
+
+    public ExternalAgentClient(String baseUrl, String modelName, String promptTemplate, String apiKey) {
         String url = baseUrl.contains("://") ? baseUrl : "http://" + baseUrl;
         this.baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        this.endpoint = chatCompletionsUrl(this.baseUrl);
+        this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.modelName = modelName;
         this.promptTemplate = promptTemplate;
-        Logger.info("LLM agent: model {} at {}, system prompt template: {}", modelName, this.baseUrl,
+        Logger.info("LLM agent: model {} at {} ({}), system prompt template: {}", modelName, endpoint,
+                this.apiKey.isEmpty() ? "no API key" : "with API key",
                 TEMPLATE_MINIMAL.equalsIgnoreCase(promptTemplate) ? TEMPLATE_MINIMAL : TEMPLATE_FULL);
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -375,53 +390,94 @@ public class ExternalAgentClient {
             default -> SYSTEM_PROMPT;
         };
 
-        String json = "{" +
-                "\"model\":\"" + jsonEscape(modelName) + "\"," +
-                "\"messages\":[" +
-                "{\"role\":\"system\",\"content\":\"" + jsonEscape(systemContent) + "\"}," +
-                "{\"role\":\"user\",\"content\":\"" + jsonEscape(userMessage) + "\"}" +
-                "]," +
-                "\"temperature\":0.3," +
-                "\"max_tokens\":16000" +
-                (Boolean.getBoolean("forge.external.agent.jsonSchema") ? RESPONSE_FORMAT : "") +
-                "}";
-
         Logger.info(jsonEscape(modelName));
         Logger.info("=== LLM REQUEST ===\n{}", userMessage);
 
         try {
-            java.net.URL url = new java.net.URL(baseUrl + "/v1/chat/completions");
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(300000);
-            conn.setDoOutput(true);
-            conn.getOutputStream().write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            conn.getOutputStream().flush();
-
-            int status = conn.getResponseCode();
-            if (status != 200) {
-                java.io.InputStream err = conn.getErrorStream();
-                String errorBody = err == null ? "" : new String(err.readAllBytes(),
-                        java.nio.charset.StandardCharsets.UTF_8);
-                Logger.warn("LLM API returned status {}: {}", status, errorBody);
+            HttpResult result = post(requestJson(systemContent, userMessage));
+            // Hosted models reject some parameters local servers accept; drop or rename the rejected one and retry
+            for (int retry = 0; retry < 2 && result.status() == 400 && adaptToRejectedParameter(result.body()); retry++) {
+                result = post(requestJson(systemContent, userMessage));
+            }
+            if (result.status() != 200) {
+                String hint = result.status() == 401 || result.status() == 403
+                        ? " (check the LLM API key)" : "";
+                Logger.warn("LLM API returned status {}{}: {}", result.status(), hint, result.body());
                 return "0";
             }
 
-            String responseBody = new String(
-                    conn.getInputStream().readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8);
-
-            String content = extractContent(responseBody);
+            String content = extractContent(result.body());
             Logger.info("=== LLM RESPONSE ===\n{}\n====================", content);
             logToSeat(userMessage, content);
             return content;
 
         } catch (Exception e) {
-            Logger.error(e, "Failed to call LLM API at {}", baseUrl);
+            Logger.error(e, "Failed to call LLM API at {}", endpoint);
             return "0";
         }
+    }
+
+    private String requestJson(String systemContent, String userMessage) {
+        return "{" +
+                "\"model\":\"" + jsonEscape(modelName) + "\"," +
+                "\"messages\":[" +
+                "{\"role\":\"system\",\"content\":\"" + jsonEscape(systemContent) + "\"}," +
+                "{\"role\":\"user\",\"content\":\"" + jsonEscape(userMessage) + "\"}" +
+                "]," +
+                (sendTemperature ? "\"temperature\":0.3," : "") +
+                (useMaxCompletionTokens ? "\"max_completion_tokens\":16000" : "\"max_tokens\":16000") +
+                (Boolean.getBoolean("forge.external.agent.jsonSchema") ? RESPONSE_FORMAT : "") +
+                "}";
+    }
+
+    private record HttpResult(int status, String body) {}
+
+    private HttpResult post(String json) throws java.io.IOException {
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(endpoint).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        if (!apiKey.isEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        }
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(300000);
+        conn.setDoOutput(true);
+        conn.getOutputStream().write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        conn.getOutputStream().flush();
+
+        int status = conn.getResponseCode();
+        java.io.InputStream in = status == 200 ? conn.getInputStream() : conn.getErrorStream();
+        String body = in == null ? "" : new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        return new HttpResult(status, body);
+    }
+
+    /** After a 400, stop sending the parameter the error names. Returns whether the request changed. */
+    private boolean adaptToRejectedParameter(String errorBody) {
+        String error = errorBody.toLowerCase();
+        if (sendTemperature && error.contains("temperature")) {
+            sendTemperature = false;
+            Logger.warn("LLM server rejected temperature; sending requests without it");
+            return true;
+        }
+        if (!useMaxCompletionTokens && error.contains("max_tokens")) {
+            useMaxCompletionTokens = true;
+            Logger.warn("LLM server rejected max_tokens; sending max_completion_tokens instead");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The chat completions URL for an address: a bare host (localhost:1234) gets /v1/chat/completions, as local
+     * servers expect; an address with a path is a provider's base URL (https://api.openai.com/v1) and gets
+     * /chat/completions; an address already ending in /chat/completions is used as is.
+     */
+    static String chatCompletionsUrl(String address) {
+        if (address.endsWith("/chat/completions")) {
+            return address;
+        }
+        String path = java.net.URI.create(address).getPath();
+        return address + (path == null || path.isEmpty() || path.equals("/") ? "/v1/chat/completions" : "/chat/completions");
     }
 
     /**

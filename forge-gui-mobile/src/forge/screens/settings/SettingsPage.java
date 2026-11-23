@@ -67,19 +67,24 @@ public class SettingsPage extends TabPage<SettingsScreen> {
         lstSettings.addGroup(Forge.getLocalizer().getMessage("ServerPreferences"));
         lstSettings.addGroup(Forge.getLocalizer().getMessage("lblAiSettings"));
 
-        // LLM AI players (group 9): used by lobby seats switched to "LLM AI"
+        // LLM AI players: used by lobby seats switched to "LLM AI". AI Settings is the last group, and addItem
+        // puts any index past the end into the last group, so this stays right however many groups come before it.
+        final int aiSettingsGroup = Integer.MAX_VALUE;
         lstSettings.addItem(new TextSetting(FPref.LLM_AGENT_URL,
                 Forge.getLocalizer().getMessage("lblLlmAgentAddress"),
-                Forge.getLocalizer().getMessage("nlLlmAgentAddress")), 9);
+                Forge.getLocalizer().getMessage("nlLlmAgentAddress")), aiSettingsGroup);
         lstSettings.addItem(new TextSetting(FPref.LLM_AGENT_MODEL,
                 Forge.getLocalizer().getMessage("lblLlmAgentModel"),
-                Forge.getLocalizer().getMessage("nlLlmAgentModel")), 9);
+                Forge.getLocalizer().getMessage("nlLlmAgentModel")), aiSettingsGroup);
+        lstSettings.addItem(new TextSetting(FPref.LLM_AGENT_API_KEY,
+                Forge.getLocalizer().getMessage("lblLlmApiKey"),
+                Forge.getLocalizer().getMessage("nlLlmApiKey"), true), aiSettingsGroup);
         Map<String, String> llmTemplates = new LinkedHashMap<>();
         llmTemplates.put(Forge.getLocalizer().getMessage("lblLlmPromptFull"), "full");
         llmTemplates.put(Forge.getLocalizer().getMessage("lblLlmPromptMinimal"), "minimal");
         lstSettings.addItem(new LocalizedSelectSetting(FPref.LLM_PROMPT_TEMPLATE,
                 Forge.getLocalizer().getMessage("lblLlmPromptTemplate"),
-                Forge.getLocalizer().getMessage("nlLlmPromptTemplate"), llmTemplates), 9);
+                Forge.getLocalizer().getMessage("nlLlmPromptTemplate"), llmTemplates), aiSettingsGroup);
 
         // GENERAL SETTINGS TAB
         lstSettings.addItem(new CustomSelectSetting(FPref.UI_LANGUAGE, Forge.getLocalizer().getMessage("cbpSelectLanguage"),
@@ -1166,8 +1171,16 @@ public class SettingsPage extends TabPage<SettingsScreen> {
 
     /** Free-text preference (e.g. the LLM server address), edited in an input dialog. */
     private class TextSetting extends Setting {
+        /** A secret (an API key) is masked in the settings list. */
+        private final boolean secret;
+
         public TextSetting(FPref pref0, String label0, String description0) {
+            this(pref0, label0, description0, false);
+        }
+
+        public TextSetting(FPref pref0, String label0, String description0, boolean secret0) {
             super(pref0, label0 + ":", description0);
+            secret = secret0;
         }
 
         @Override
@@ -1183,7 +1196,11 @@ public class SettingsPage extends TabPage<SettingsScreen> {
 
         @Override
         public void drawPrefValue(Graphics g, FSkinFont font, FSkinColor color, float x, float y, float w, float h) {
-            g.drawText(FModel.getPreferences().getPref((FPref) pref), font, color, x, y, w, h, false, Align.right, false);
+            String value = FModel.getPreferences().getPref((FPref) pref);
+            if (secret) {
+                value = value.isEmpty() ? Forge.getLocalizer().getMessage("lblLlmApiKeyNotSet") : "••••••••";
+            }
+            g.drawText(value, font, color, x, y, w, h, false, Align.right, false);
         }
     }
 
